@@ -35,7 +35,7 @@ def main() -> int:
 
         call(
             [sys.executable, "-m", "pip", "wheel", ".", "--no-deps",
-             "--no-build-isolation", "--wheel-dir", str(dist)],
+             "--wheel-dir", str(dist)],
             repo,
         )
         wheels = list(dist.glob("*.whl"))
