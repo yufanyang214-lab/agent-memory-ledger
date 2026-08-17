@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-17",
+  "verdict": "passed",
+  "contract": "session A -> standalone archive -> fresh session B -> audited recall",
+  "automated_tests": {
+    "unit_and_integration": {
+      "passed": 11,
+      "failed": 0
+    },
+    "platform_free_clean_room": {
+      "passed": true,
+      "objects": 5,
+      "bright_entries": 2,
+      "dark_entries": 5,
+      "retrieval_sources": ["fts", "overlap-example"],
+      "platform_specific_dirs_created": false,
+      "raw_text_only_in_evidence": true
+    },
+    "workspace_installer": {
+      "passed": true,
+      "version": "0.1.0",
+      "official_memory_modified": false
+    }
+  },
+  "clean_agent_e2e": {
+    "unique_marker": "Nacre-7Q-BlueHeron",
+    "baseline_built_in_results": 0,
+    "archive": {
+      "status": "completed",
+      "archives": 1,
+      "objects": 4,
+      "promoted_objects": 2,
+      "validation_ok": true
+    },
+    "negative_control": {
+      "answer": "UNKNOWN",
+      "tool_calls": 0,
+      "contained_unique_marker": false
+    },
+    "skill_recall": {
+      "all_content_assertions_passed": true,
+      "semantic_object_id": "mem_2a38a3b5ba2e446ee76c",
+      "procedural_object_id": "mem_e0ee6b0d03e5ab9d987b",
+      "used_standalone_bridge": true,
+      "used_built_in_memory_search": false
+    },
+    "final_built_in_results": 0,
+    "idempotence": {
+      "same_archive_id": true,
+      "same_created_at": true,
+      "same_object_ids": true,
+      "archives_after_repeat": 1,
+      "objects_after_repeat": 4
+    },
+    "official_index_note": "OpenClaw automatically indexed only its scaffold USER.md after the first turn; the unique test marker remained absent."
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-17",
+  "runtime": {
+    "name": "Codex CLI",
+    "version": "0.144.1"
+  },
+  "verdict": "passed",
+  "isolation": {
+    "disposable_repository": true,
+    "fresh_home": true,
+    "ignore_user_config": true,
+    "codex_memories_disabled": true,
+    "global_user_skills_invoked": false
+  },
+  "write_thread": {
+    "status": "completed",
+    "unique_marker": "Argent-Codex-10-Sable",
+    "semantic_object_id": "mem_421f90ec1ad4cb075c63",
+    "procedural_object_id": "mem_c6b59318114f7d0eda82",
+    "decision_object_id": "mem_8747e6a9f28000ea7077",
+    "archive_event_object_id": "mem_180b501d8b529198c3a0",
+    "promoted_objects": 2,
+    "used_local_bridge": true,
+    "used_other_memory_command": false
+  },
+  "negative_control": {
+    "answer": "UNKNOWN",
+    "command_count": 0,
+    "contained_unique_marker": false
+  },
+  "recall_thread": {
+    "codename_correct": true,
+    "ordered_steps_correct": true,
+    "semantic_object_id_returned": true,
+    "procedural_object_id_returned": true,
+    "used_stable_repository_adapter": true,
+    "used_other_memory_command": false
+  },
+  "incremental_snapshots": {
+    "evidence_versions": 2,
+    "visible_message_counts": [2, 3],
+    "active_objects": 4,
+    "archive_event_objects": 1,
+    "bright_entries": 2,
+    "dark_entries": 4,
+    "repeat_completed_snapshot_same_archive_id": true,
+    "repeat_completed_snapshot_same_created_at": true,
+    "repeat_completed_snapshot_same_object_ids": true,
+    "validation_ok": true
+  },
+  "native_plugin": {
+    "marketplace_add_passed": true,
+    "plugin_id": "agent-memory-ledger@agent-memory-ledger",
+    "installed": true,
+    "enabled": true,
+    "manifest_present": true,
+    "skill_present": true,
+    "installer_present": true,
+    "bridge_present": true,
+    "stable_adapter_install_passed": true
+  }
+}

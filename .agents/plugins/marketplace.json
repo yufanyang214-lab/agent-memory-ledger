@@ -1,0 +1,21 @@
+{
+  "name": "agent-memory-ledger",
+  "interface": {
+    "displayName": "Agent Memory Ledger"
+  },
+  "plugins": [
+    {
+      "name": "agent-memory-ledger",
+      "source": {
+        "source": "local",
+        "path": "./integrations/codex-plugin"
+      },
+      "description": "Standalone session archiving, structured objects, and bright/dark memory ledgers for Codex CLI.",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

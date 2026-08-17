@@ -1,0 +1,40 @@
+{
+  "session_id": "portable-memory-demo-001",
+  "source": "example-agent",
+  "session_type": "conversation",
+  "title": "Design a portable agent memory module",
+  "tags": ["demo", "memory-design"],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Build a memory module that is not tied to one agent platform."
+    },
+    {
+      "role": "assistant",
+      "content": "结论：The filesystem object store is the source of truth.\n流程：Archive the sanitized session, extract structured objects, then rebuild derived indexes.\n完成：The minimal dual-ledger design was accepted."
+    }
+  ],
+  "memory_candidates": [
+    {
+      "kind": "semantic",
+      "title": "Canonical storage invariant",
+      "content": "Memory objects stored in the workspace are canonical; SQLite and vector databases are rebuildable indexes.",
+      "summary": "Filesystem objects are canonical and indexes are derived.",
+      "importance": 95,
+      "confidence": 0.98,
+      "promote": true,
+      "aliases": ["source of truth", "canonical memory"],
+      "tags": ["architecture", "storage"]
+    },
+    {
+      "kind": "procedural",
+      "title": "Session archiving loop",
+      "content": "Sanitize the session, classify it, preserve evidence, extract memory objects, update both ledgers, then validate recall.",
+      "summary": "The portable session-to-memory workflow.",
+      "importance": 85,
+      "confidence": 0.95,
+      "promote": true,
+      "tags": ["workflow", "archive"]
+    }
+  ]
+}

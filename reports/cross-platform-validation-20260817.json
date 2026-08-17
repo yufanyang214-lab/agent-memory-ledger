@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-17",
+  "overall": "platform_neutral_core_validated",
+  "core": {
+    "tests_passed": 17,
+    "tests_failed": 0,
+    "platform_free_clean_room": "passed",
+    "runtime_dependencies": [],
+    "raw_text_only_in_evidence": true
+  },
+  "runtimes": {
+    "openclaw": {
+      "native_install": "passed",
+      "real_session_conversion": "passed",
+      "negative_control": "passed",
+      "fresh_session_model_recall": "passed",
+      "verdict": "full_e2e_passed"
+    },
+    "codex_cli": {
+      "version": "0.144.1",
+      "native_install": "passed",
+      "real_session_conversion": "passed",
+      "negative_control": "passed",
+      "fresh_session_model_recall": "passed",
+      "native_marketplace_from_sdist": "passed",
+      "verdict": "full_e2e_passed"
+    },
+    "kimi_code_cli": {
+      "version": "1.31.0",
+      "native_install": "passed",
+      "isolated_skill_discovery": "passed",
+      "real_session_conversion": "passed",
+      "real_export_zip_conversion": "passed",
+      "deterministic_archive_recall": "passed",
+      "fresh_session_model_recall": "blocked_by_account_usage_limit",
+      "verdict": "adapter_passed_live_model_e2e_blocked"
+    }
+  },
+  "release_artifact": {
+    "wheel_install": "passed",
+    "sdist_required_files": "passed",
+    "codex_plugin_install_from_extracted_sdist": "passed",
+    "kimi_plugin_install_from_extracted_sdist": "passed"
+  },
+  "remaining_gate": "Repeat Kimi model-driven archive, negative control, and fresh recall after account allowance refresh."
+}

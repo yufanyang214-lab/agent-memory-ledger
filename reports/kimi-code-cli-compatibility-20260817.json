@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "date": "2026-08-17",
+  "runtime": {
+    "name": "Kimi Code CLI",
+    "version": "1.31.0"
+  },
+  "verdict": {
+    "native_plugin_and_adapter": "passed",
+    "live_model_cross_session_e2e": "blocked_by_account_usage_limit"
+  },
+  "native_plugin": {
+    "directory_install_passed": true,
+    "plugin_list_passed": true,
+    "plugin_info_passed": true,
+    "runtime_host": "kimi-code",
+    "runtime_version": "1.31.0",
+    "fresh_home_skill_discovery_passed": true,
+    "only_external_skill_root_was_plugin_directory": true
+  },
+  "real_session_probe": {
+    "session_id": "omitted_from_public_report",
+    "model_result": "http_403_usage_limit",
+    "export_succeeded": true,
+    "export_files": [
+      "manifest.json",
+      "context.jsonl",
+      "wire.jsonl",
+      "logs/kimi.log"
+    ],
+    "zip_conversion_passed": true,
+    "direct_context_location_passed": true,
+    "visible_messages": 1,
+    "visible_roles": ["user"]
+  },
+  "deterministic_adapter_e2e": {
+    "archive_status": "completed",
+    "session_id": "kimi-synthetic-001",
+    "unique_marker": "Luna-Kimi-8-Oriole",
+    "visible_messages": 2,
+    "active_objects": 4,
+    "promoted_objects": 2,
+    "semantic_object_id": "mem_416461c1ae40d170ab99",
+    "procedural_object_id": "mem_c6b59318114f7d0eda82",
+    "codename_recall_correct": true,
+    "ordered_steps_recall_correct": true,
+    "validation_ok": true
+  },
+  "exclusion_checks": {
+    "system_prompt_excluded": true,
+    "checkpoint_and_usage_records_excluded": true,
+    "synthetic_system_reminder_excluded": true,
+    "thinking_excluded": true,
+    "tool_calls_excluded": true,
+    "tool_results_excluded": true,
+    "wire_data_excluded": true,
+    "diagnostic_logs_excluded": true
+  },
+  "remaining_gate": "Rerun model-driven session A, negative control, and fresh recall after account allowance refresh."
+}
