@@ -18,6 +18,7 @@ else:
 
 from .models import (
     IndexRecord,
+    MEMORY_KIND_ALIASES,
     MemoryDraft,
     MemoryKind,
     MemoryObject,
@@ -25,6 +26,9 @@ from .models import (
     SessionBundle,
     utc_now,
 )
+
+
+WORKSPACE_SCHEMA_VERSION = 2
 
 
 class WorkspaceStore:
@@ -59,9 +63,10 @@ class WorkspaceStore:
             self._write_json_atomic(
                 self.config_path,
                 {
-                    "schema_version": 1,
+                    "schema_version": WORKSPACE_SCHEMA_VERSION,
                     "created_at": utc_now(),
                     "storage": "filesystem+sqlite",
+                    "memory_kinds": [kind.value for kind in MemoryKind],
                     "bright_ledger": "ledgers/bright.jsonl",
                     "dark_ledger": "ledgers/dark.jsonl",
                 },
@@ -118,6 +123,8 @@ class WorkspaceStore:
                 );
                 """
             )
+        self._migrate_legacy_kinds_unlocked()
+        self._upgrade_workspace_config_unlocked()
         self.sync_ledgers()
 
     @contextmanager
@@ -174,6 +181,115 @@ class WorkspaceStore:
         con.execute("PRAGMA foreign_keys = ON")
         con.execute("PRAGMA journal_mode = WAL")
         return con
+
+    def _migrate_legacy_kinds_unlocked(self) -> None:
+        """Move pre-0.1 object files to canonical kind directories without changing IDs."""
+        migrated: list[dict[str, str]] = []
+        for legacy_kind, canonical_kind in MEMORY_KIND_ALIASES.items():
+            legacy_dir = self.objects_dir / legacy_kind
+            if not legacy_dir.is_dir():
+                continue
+            for legacy_path in sorted(legacy_dir.glob("*.json")):
+                payload = json.loads(legacy_path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    raise RuntimeError(f"invalid legacy memory object: {legacy_path}")
+                object_id = str(payload.get("object_id") or legacy_path.stem)
+                if object_id != legacy_path.stem:
+                    raise RuntimeError(
+                        f"legacy object filename/id mismatch: {legacy_path}"
+                    )
+                try:
+                    payload_kind = MemoryKind(payload.get("kind", legacy_kind)).value
+                except ValueError as exc:
+                    raise RuntimeError(
+                        f"invalid legacy object kind in {legacy_path}: {payload.get('kind')}"
+                    ) from exc
+                if payload_kind != canonical_kind:
+                    raise RuntimeError(
+                        f"legacy directory/object kind mismatch: {legacy_path}"
+                    )
+                payload["kind"] = canonical_kind
+                try:
+                    object_schema = int(payload.get("schema_version", 1))
+                except (TypeError, ValueError):
+                    object_schema = 1
+                payload["schema_version"] = max(2, object_schema)
+
+                canonical_path = self.objects_dir / canonical_kind / legacy_path.name
+                if canonical_path.is_file():
+                    existing = json.loads(canonical_path.read_text(encoding="utf-8"))
+                    if not isinstance(existing, dict):
+                        raise RuntimeError(
+                            f"invalid canonical memory object: {canonical_path}"
+                        )
+                    try:
+                        existing["kind"] = MemoryKind(
+                            existing.get("kind", canonical_kind)
+                        ).value
+                    except ValueError as exc:
+                        raise RuntimeError(
+                            f"invalid canonical object kind in {canonical_path}"
+                        ) from exc
+                    try:
+                        existing_schema = int(existing.get("schema_version", 1))
+                    except (TypeError, ValueError):
+                        existing_schema = 1
+                    existing["schema_version"] = max(2, existing_schema)
+                    if existing != payload:
+                        raise RuntimeError(
+                            "legacy/canonical memory object conflict: "
+                            f"{legacy_path.relative_to(self.root)}"
+                        )
+                else:
+                    self._write_json_atomic(canonical_path, payload)
+
+                relative_path = canonical_path.relative_to(self.root).as_posix()
+                with self.connect() as con:
+                    con.execute(
+                        """
+                        UPDATE objects
+                        SET kind = ?, relative_path = ?, schema_version = ?
+                        WHERE object_id = ?
+                        """,
+                        (
+                            canonical_kind,
+                            relative_path,
+                            payload["schema_version"],
+                            object_id,
+                        ),
+                    )
+                legacy_path.unlink()
+                migrated.append(
+                    {
+                        "object_id": object_id,
+                        "from": legacy_kind,
+                        "to": canonical_kind,
+                    }
+                )
+        if migrated:
+            self._append_journal_unlocked(
+                "workspace.memory_kinds_migrated",
+                {"objects": migrated, "schema_version": WORKSPACE_SCHEMA_VERSION},
+            )
+
+    def _upgrade_workspace_config_unlocked(self) -> None:
+        config = json.loads(self.config_path.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise RuntimeError("workspace.json must contain a JSON object")
+        changed = False
+        try:
+            current_schema = int(config.get("schema_version", 1))
+        except (TypeError, ValueError):
+            current_schema = 1
+        if current_schema < WORKSPACE_SCHEMA_VERSION:
+            config["schema_version"] = WORKSPACE_SCHEMA_VERSION
+            changed = True
+        canonical_kinds = [kind.value for kind in MemoryKind]
+        if config.get("memory_kinds") != canonical_kinds:
+            config["memory_kinds"] = canonical_kinds
+            changed = True
+        if changed:
+            self._write_json_atomic(self.config_path, config)
 
     def archive_session(self, session: SessionBundle, library: str) -> dict[str, Any]:
         with self.write_lock():
@@ -286,14 +402,29 @@ class WorkspaceStore:
     ) -> MemoryObject:
         self.initialize()
         normalized = " ".join(draft.content.split())
-        object_id = "mem_" + sha256(
-            f"{draft.kind.value}\0{draft.title.strip()}\0{normalized}".encode("utf-8")
-        ).hexdigest()[:20]
+        object_id = self._object_id(
+            draft.kind.value, draft.title.strip(), normalized
+        )
+        existing = self.get_object(object_id)
+        if existing is None:
+            # A migrated pre-0.1 object keeps its published ID. Re-ingesting the
+            # same content through a legacy alias must find that object instead
+            # of creating a canonical-ID duplicate.
+            for legacy_kind, canonical_kind in MEMORY_KIND_ALIASES.items():
+                if canonical_kind != draft.kind.value:
+                    continue
+                legacy_id = self._object_id(
+                    legacy_kind, draft.title.strip(), normalized
+                )
+                legacy_object = self.get_object(legacy_id)
+                if legacy_object is not None:
+                    object_id = legacy_id
+                    existing = legacy_object
+                    break
         now = utc_now()
         relative_path = f"objects/{draft.kind.value}/{object_id}.json"
         path = self.root / relative_path
 
-        existing = self.get_object(object_id)
         status = existing.status if existing else "active"
         promoted = bool(draft.promote or (existing.promoted if existing else False))
         if status != "active":
@@ -351,6 +482,7 @@ class WorkspaceStore:
                     created_at, updated_at, schema_version, metadata_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(object_id) DO UPDATE SET
+                    kind=excluded.kind,
                     title=excluded.title,
                     summary=excluded.summary,
                     content=excluded.content,
@@ -358,9 +490,11 @@ class WorkspaceStore:
                     confidence=MAX(objects.confidence, excluded.confidence),
                     tags_json=excluded.tags_json,
                     aliases_json=excluded.aliases_json,
+                    status=excluded.status,
                     promoted=MAX(objects.promoted, excluded.promoted),
                     relative_path=excluded.relative_path,
                     updated_at=excluded.updated_at,
+                    schema_version=MAX(objects.schema_version, excluded.schema_version),
                     metadata_json=excluded.metadata_json
                 """,
                 (
@@ -414,6 +548,13 @@ class WorkspaceStore:
         )
         self.sync_ledgers()
         return memory_object
+
+    @staticmethod
+    def _object_id(kind: str, title: str, normalized_content: str) -> str:
+        digest = sha256(
+            f"{kind}\0{title}\0{normalized_content}".encode("utf-8")
+        ).hexdigest()[:20]
+        return "mem_" + digest
 
     def promote(self, object_id: str, reason: str = "manual") -> MemoryObject:
         with self.write_lock():
@@ -502,7 +643,7 @@ class WorkspaceStore:
         params: list[Any] = []
         if kind is not None:
             clauses.append("kind = ?")
-            params.append(kind)
+            params.append(MemoryKind(kind).value)
         if promoted is not None:
             clauses.append("promoted = ?")
             params.append(int(promoted))
@@ -626,9 +767,7 @@ class WorkspaceStore:
         required_dirs = [
             self.evidence_dir / "primary",
             self.evidence_dir / "auxiliary",
-            self.objects_dir / "semantic",
-            self.objects_dir / "procedural",
-            self.objects_dir / "event",
+            *(self.objects_dir / kind.value for kind in MemoryKind),
             self.ledgers_dir,
             self.state_dir,
         ]
@@ -656,7 +795,7 @@ class WorkspaceStore:
                     )
         with self.connect() as con:
             object_rows = con.execute(
-                "SELECT object_id, relative_path, status FROM objects"
+                "SELECT object_id, kind, relative_path, status FROM objects"
             ).fetchall()
             archive_rows = con.execute(
                 "SELECT archive_id, relative_path FROM archives"
@@ -666,8 +805,26 @@ class WorkspaceStore:
             ).fetchone()[0]
             fts_count = con.execute("SELECT COUNT(*) FROM objects_fts").fetchone()[0]
         for row in object_rows:
-            if not (self.root / str(row["relative_path"])).is_file():
+            path = self.root / str(row["relative_path"])
+            if not path.is_file():
                 errors.append(f"database object missing file: {row['object_id']}")
+                continue
+            if str(row["kind"]) not in {kind.value for kind in MemoryKind}:
+                errors.append(
+                    f"database object uses non-canonical kind: {row['object_id']}"
+                )
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                errors.append(f"invalid object file {row['object_id']}: {exc}")
+                continue
+            if not isinstance(payload, dict):
+                errors.append(f"invalid object file {row['object_id']}: expected object")
+                continue
+            if payload.get("kind") != row["kind"]:
+                errors.append(
+                    f"object kind/path catalog mismatch: {row['object_id']}"
+                )
         for row in archive_rows:
             archive_dir = self.root / str(row["relative_path"])
             for name in ("session.json", "transcript.md", "manifest.json"):

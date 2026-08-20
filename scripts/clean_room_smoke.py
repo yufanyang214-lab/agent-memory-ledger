@@ -71,14 +71,14 @@ def main() -> int:
             ],
             "memory_candidates": [
                 {
-                    "kind": "semantic", "title": "Canonical memory source",
+                    "kind": "knowledge", "title": "Canonical memory source",
                     "content": "The filesystem is the canonical memory source.",
                     "summary": "Canonical memory stays outside replaceable indexes.",
                     "importance": 92, "confidence": 0.98,
                     "tags": ["storage", "memory"], "promote": True,
                 },
                 {
-                    "kind": "procedural", "title": "Release verification",
+                    "kind": "procedure", "title": "Release verification",
                     "content": "Run tests, build, and validate artifacts before publishing.",
                     "summary": "Reusable release verification procedure.",
                     "importance": 84, "confidence": 0.95,
@@ -121,6 +121,15 @@ def main() -> int:
             "validated": checked.get("ok") is True,
             "evidence": len(list(memory.glob("evidence/*/*/manifest.json"))) == 1,
             "objects": len(objects) >= 3,
+            "canonical_kinds": (
+                {item.get("kind") for item in object_payloads}
+                <= {"knowledge", "procedure", "event"}
+                and (memory / "objects/knowledge").is_dir()
+                and (memory / "objects/procedure").is_dir()
+                and (memory / "objects/event").is_dir()
+                and not (memory / "objects/semantic").exists()
+                and not (memory / "objects/procedural").exists()
+            ),
             "bright_ledger": bright_path.is_file() and count(bright_path) >= 2,
             "dark_ledger": dark_path.is_file() and count(dark_path) >= 3,
             "sqlite": (memory / "state/catalog.sqlite3").is_file(),

@@ -36,10 +36,14 @@ LEDGER="$PWD/.portable-memory"
 
 Resolve the current agent id and exact session key from runtime context. Then:
 
-Archive when the user gives the configured explicit trigger. First extract
-durable `semantic`, `procedural`, and `event` candidates into a JSON file as
-described in `docs/AGENT_INSTRUCTIONS.md`. Set `promote: true` only for the
-small set of stable, high-value items that should be discoverable at startup.
+Archive only when the user affirmatively asks to archive the current session
+with the configured trigger or an equivalent such as "archive", "archive this
+session", “归档本会话”, or “按 AML 归档”. Questions, explanations, quotations,
+hypotheticals, and negations about archiving do not trigger the workflow. First
+extract durable `knowledge`, `procedure`, and `event` candidates into a JSON
+file as described in `docs/AGENT_INSTRUCTIONS.md`. Use tags for finer subtypes
+and canonical kind names only. Set `promote: true` only for the small set of
+stable, high-value items that should be discoverable at startup.
 
 ```bash
 "$PY" "$BRIDGE" archive \

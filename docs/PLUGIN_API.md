@@ -17,7 +17,7 @@ class MyExtractor:
         # Call an LLM, a local model, or deterministic application logic here.
         return [
             MemoryDraft(
-                kind=MemoryKind.SEMANTIC,
+                kind=MemoryKind.KNOWLEDGE,
                 title="Example fact",
                 content="A durable statement extracted from the session.",
                 summary="A durable statement.",
@@ -42,9 +42,19 @@ aml --workspace ./memory ingest session.json \
 
 The extractor must not write ledgers, evidence, object files, or SQLite directly. It returns candidates; the core performs deterministic storage and validation.
 
+Extractor plugins should emit AML's canonical `MemoryKind.KNOWLEDGE`,
+`MemoryKind.PROCEDURE`, or `MemoryKind.EVENT`. Knowledge covers durable facts,
+decisions, preferences, constraints, conclusions, and state; procedure covers
+reusable workflows and rollback; event covers dated milestones, incidents, and
+state changes. Use tags for finer subtypes. The deprecated programmatic aliases
+`MemoryKind.SEMANTIC` and `MemoryKind.PROCEDURAL` remain source-compatible, but
+their serialized values are canonicalized.
+
 ## Semantic-index plugin
 
 A semantic-index adapter wraps both the embedding implementation and the vector database. This avoids forcing the core to coordinate incompatible embedding clients, dimensions, and database SDKs.
+Here, "semantic" describes the retrieval method; `SemanticIndex` is not an
+additional memory-object kind.
 
 ```python
 from pathlib import Path

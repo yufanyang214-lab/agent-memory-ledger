@@ -32,7 +32,7 @@ class ConcurrentWorkspaceTests(unittest.TestCase):
                             ],
                             "memory_candidates": [
                                 {
-                                    "kind": "semantic",
+                                    "kind": "knowledge",
                                     "title": f"Concurrent fact {index:02d}",
                                     "content": f"Concurrent value {index:02d} is durable.",
                                     "importance": 60,

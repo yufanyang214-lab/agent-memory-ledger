@@ -43,7 +43,7 @@ class MemoryLedgerEndToEndTests(unittest.TestCase):
                 ],
                 "memory_candidates": [
                     {
-                        "kind": "semantic",
+                        "kind": "knowledge",
                         "title": "Canonical storage invariant",
                         "content": (
                             "Filesystem objects are canonical; derived indexes can be rebuilt. "
@@ -65,7 +65,7 @@ class MemoryLedgerEndToEndTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["library"], "primary")
         kinds = {item["kind"] for item in result["objects"]}
-        self.assertTrue({"semantic", "procedural", "event"}.issubset(kinds))
+        self.assertTrue({"knowledge", "procedure", "event"}.issubset(kinds))
         archive_event = next(
             item for item in result["objects"] if "session-archive" in item["tags"]
         )
@@ -119,7 +119,7 @@ class MemoryLedgerEndToEndTests(unittest.TestCase):
 
     def test_duplicate_object_merges_metadata_and_provenance(self) -> None:
         base_candidate = {
-            "kind": "semantic",
+            "kind": "knowledge",
             "title": "Shared invariant",
             "content": "Indexes are derived from canonical memory objects.",
             "summary": "Indexes are derived.",
@@ -210,7 +210,7 @@ class MemoryLedgerEndToEndTests(unittest.TestCase):
                 ],
                 "memory_candidates": [
                     {
-                        "kind": "procedural",
+                        "kind": "procedure",
                         "title": "Nightly validation",
                         "content": "Run validation before publishing a release.",
                         "importance": 60,

@@ -18,7 +18,7 @@ class CustomExtractor:
     def extract(self, session: SessionBundle, library: str) -> list[MemoryDraft]:
         return [
             MemoryDraft(
-                kind=MemoryKind.SEMANTIC,
+                kind=MemoryKind.KNOWLEDGE,
                 title="Plugin-produced memory",
                 content="The extractor interface is independent of the storage layer.",
                 summary="Extractor and storage are decoupled.",

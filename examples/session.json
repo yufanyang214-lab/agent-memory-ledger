@@ -16,7 +16,7 @@
   ],
   "memory_candidates": [
     {
-      "kind": "semantic",
+      "kind": "knowledge",
       "title": "Canonical storage invariant",
       "content": "Memory objects stored in the workspace are canonical; SQLite and vector databases are rebuildable indexes.",
       "summary": "Filesystem objects are canonical and indexes are derived.",
@@ -27,7 +27,7 @@
       "tags": ["architecture", "storage"]
     },
     {
-      "kind": "procedural",
+      "kind": "procedure",
       "title": "Session archiving loop",
       "content": "Sanitize the session, classify it, preserve evidence, extract memory objects, update both ledgers, then validate recall.",
       "summary": "The portable session-to-memory workflow.",

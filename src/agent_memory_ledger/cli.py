@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .models import Library, SessionBundle
+from .models import Library, MemoryKind, SessionBundle
 from .ports import load_plugin
 from .service import MemoryLedger
 
@@ -56,7 +56,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_plugin_args(search)
 
     list_parser = subparsers.add_parser("list", help="list active memory objects")
-    list_parser.add_argument("--kind", choices=["semantic", "procedural", "event"])
+    list_parser.add_argument(
+        "--kind",
+        choices=MemoryKind.accepted_values(),
+        help=(
+            "filter by knowledge, procedure, or event "
+            "(legacy semantic/procedural aliases are accepted)"
+        ),
+    )
     list_parser.add_argument("--bright", action="store_true", help="only promoted objects")
 
     show = subparsers.add_parser("show", help="show one memory object")

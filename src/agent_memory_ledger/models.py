@@ -39,9 +39,40 @@ class Library(str, Enum):
 
 
 class MemoryKind(str, Enum):
-    SEMANTIC = "semantic"
-    PROCEDURAL = "procedural"
+    """Canonical AML object kinds with read-time aliases for pre-0.1 inputs."""
+
+    KNOWLEDGE = "knowledge"
+    PROCEDURE = "procedure"
     EVENT = "event"
+
+    # Programmatic aliases keep older extractor plugins source-compatible while
+    # ensuring every serialized value uses AML's canonical vocabulary.
+    SEMANTIC = "knowledge"
+    PROCEDURAL = "procedure"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "MemoryKind | None":
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        for kind in cls:
+            if kind.value == normalized:
+                return kind
+        aliases = {
+            "semantic": cls.KNOWLEDGE,
+            "procedural": cls.PROCEDURE,
+        }
+        return aliases.get(normalized)
+
+    @classmethod
+    def accepted_values(cls) -> tuple[str, ...]:
+        return ("knowledge", "procedure", "event", "semantic", "procedural")
+
+
+MEMORY_KIND_ALIASES: dict[str, str] = {
+    "semantic": MemoryKind.KNOWLEDGE.value,
+    "procedural": MemoryKind.PROCEDURE.value,
+}
 
 
 @dataclass(slots=True)
@@ -228,7 +259,7 @@ class MemoryObject:
     promoted: bool = False
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
-    schema_version: int = 1
+    schema_version: int = 2
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

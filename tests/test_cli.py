@@ -28,7 +28,7 @@ class CliTests(unittest.TestCase):
                     ],
                     "memory_candidates": [
                         {
-                            "kind": "procedural",
+                            "kind": "procedure",
                             "title": "CLI verification",
                             "content": "Run validate after importing a session.",
                             "importance": 80,
@@ -53,7 +53,11 @@ class CliTests(unittest.TestCase):
 
         hits = self._run("search", "durable memory", "--top-k", "3")
         self.assertTrue(hits)
-        self.assertTrue(any(item["kind"] == "semantic" for item in hits))
+        self.assertTrue(any(item["kind"] == "knowledge" for item in hits))
+
+        # Pre-0.1 CLI filters remain accepted but return canonical objects.
+        legacy_filter = self._run("list", "--kind", "procedural")
+        self.assertEqual([item["kind"] for item in legacy_filter], ["procedure"])
 
         bright = self._run("list", "--bright")
         self.assertEqual([item["title"] for item in bright], ["CLI verification"])
