@@ -51,6 +51,7 @@ The filesystem is the source of truth. SQLite and vector indexes are derived and
 - Conservative secret redaction before persistence.
 - `semantic`, `procedural`, and `event` memory objects.
 - Deterministic object IDs and idempotent re-ingestion.
+- Cross-process workspace locking for concurrent agent writers.
 - Human-readable evidence manifests and transcripts.
 - Bright/dark ledger snapshots plus an append-only audit journal.
 - SQLite FTS5 search with no external service.
@@ -156,6 +157,7 @@ The example creates a workspace like this:
 │   └── dark.jsonl
 ├── state/
 │   ├── catalog.sqlite3
+│   ├── workspace.lock
 │   └── journal.jsonl
 └── workspace.json
 ```
@@ -237,6 +239,14 @@ aml --workspace ./memory \
 A runnable standard-library example is included at
 [`examples/overlap_index_plugin.py`](examples/overlap_index_plugin.py).
 See [`docs/PLUGIN_API.md`](docs/PLUGIN_API.md).
+
+## Concurrent writers
+
+Mutating operations acquire an operating-system file lock at
+`state/workspace.lock`. Cooperating agent processes therefore serialize writes
+to evidence, objects, SQLite, ledgers, and the audit journal. Snapshot files use
+unique same-directory temporary files followed by an atomic replace. Direct
+writes that bypass the Agent Memory Ledger API are not covered by this lock.
 
 ## Design rules
 
