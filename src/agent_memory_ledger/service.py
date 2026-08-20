@@ -5,7 +5,7 @@ from typing import Any
 
 from .extractors import BasicSanitizer, HeuristicExtractor, classify_session
 from .models import IndexRecord, Library, MemoryObject, SearchHit, SessionBundle
-from .ports import FilteredSemanticIndex, MemoryExtractor, Sanitizer, SemanticIndex
+from .ports import MemoryExtractor, Sanitizer, SemanticIndex
 from .store import WorkspaceStore
 
 
@@ -82,49 +82,19 @@ class MemoryLedger:
             "index_error": index_error,
         }
 
-    def search(
-        self,
-        query: str,
-        *,
-        top_k: int = 10,
-        scope: str = "active",
-    ) -> list[dict[str, Any]]:
-        if scope not in {"active", "bright"}:
-            raise ValueError("search scope must be 'active' or 'bright'")
+    def search(self, query: str, *, top_k: int = 10) -> list[dict[str, Any]]:
         limit = max(1, int(top_k))
         ranked: dict[str, dict[str, Any]] = {}
-        fts_hits = self.store.search_fts(
-            query,
-            top_k=limit * 2,
-            promoted=True if scope == "bright" else None,
-        )
+        fts_hits = self.store.search_fts(query, top_k=limit * 2)
         self._merge_ranked(ranked, fts_hits)
 
         if self.semantic_index is not None:
             try:
-                if scope == "bright" and isinstance(
-                    self.semantic_index, FilteredSemanticIndex
-                ):
-                    semantic_hits = self.semantic_index.search_filtered(
-                        query,
-                        top_k=limit * 2,
-                        metadata={"promoted": True},
-                    )
-                else:
-                    # Legacy adapters cannot filter before ranking. Oversample
-                    # bright recall, then enforce the scope while hydrating.
-                    semantic_limit = limit * (8 if scope == "bright" else 2)
-                    semantic_hits = self.semantic_index.search(
-                        query, top_k=semantic_limit
-                    )
+                semantic_hits = self.semantic_index.search(query, top_k=limit * 2)
             except Exception as exc:  # adapters must not take down core recall
                 self.store.append_journal(
                     "semantic_index.search_failed",
-                    {
-                        "query": query,
-                        "scope": scope,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    },
+                    {"query": query, "error": f"{type(exc).__name__}: {exc}"},
                 )
             else:
                 self._merge_ranked(ranked, semantic_hits)
@@ -132,13 +102,11 @@ class MemoryLedger:
         ordered = sorted(
             ranked.values(),
             key=lambda item: (-float(item["score"]), str(item["object_id"])),
-        )
+        )[:limit]
         results: list[dict[str, Any]] = []
         for item in ordered:
             memory_object = self.store.get_object(str(item["object_id"]))
             if memory_object is None or memory_object.status != "active":
-                continue
-            if scope == "bright" and not memory_object.promoted:
                 continue
             results.append(
                 {
@@ -159,8 +127,6 @@ class MemoryLedger:
                     "retrieval_sources": sorted(item["sources"]),
                 }
             )
-            if len(results) >= limit:
-                break
         return results
 
     def promote(self, object_id: str, *, reason: str = "manual") -> dict[str, Any]:

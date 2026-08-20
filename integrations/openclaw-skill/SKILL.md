@@ -10,9 +10,12 @@ procedures, decisions, or events across OpenClaw sessions.
 
 ## Boundary
 
-This bridge must not write `MEMORY.md`, `memory/`, OpenClaw Memory SQLite,
-MemPalace, or any platform-owned memory store. The standalone ledger directory
-is the only write target.
+The standalone ledger directory is the canonical memory write target. This
+bridge must not write `MEMORY.md`, `memory/`, OpenClaw Memory SQLite, or another
+platform-owned store. When the operator explicitly configures external-memory
+mode, a separate provider such as MemPalace may receive only sanitized evidence
+or derived objects after successful AML archival; it must retain AML
+archive/object provenance.
 
 Install the core package into a workspace-local virtual environment once:
 
@@ -33,18 +36,25 @@ LEDGER="$PWD/.portable-memory"
 
 Resolve the current agent id and exact session key from runtime context. Then:
 
+Archive when the user gives the configured explicit trigger. First extract
+durable `semantic`, `procedural`, and `event` candidates into a JSON file as
+described in `docs/AGENT_INSTRUCTIONS.md`. Set `promote: true` only for the
+small set of stable, high-value items that should be discoverable at startup.
+
 ```bash
 "$PY" "$BRIDGE" archive \
   --agent <agent-id> \
   --session-key <exact-session-key> \
   --ledger "$LEDGER" \
-  --promote-markers
+  --candidate-file /path/to/memory-candidates.json
 ```
 
-`--promote-markers` is appropriate only when the user explicitly supplies
-stable lines such as `Fact:`, `Rule:`, `Procedure:`, `Decision:`, `事实：`,
-`规则：`, or `流程：`. It promotes extracted semantic/procedural objects into
-the bright ledger; ordinary session events remain dark-ledger entries.
+Every accepted active candidate is represented in the dark ledger. The bridge
+uses candidate `promote` values to build the bright ledger. Add
+`--promote-markers` only when the user explicitly supplies stable lines such as
+`Fact:`, `Rule:`, `Procedure:`, `Decision:`, `事实：`, `规则：`, or `流程：`.
+Never edit evidence, objects, ledgers, SQLite, or the journal directly. Run
+validation after archival and report the archive, object, and promoted IDs.
 
 The bridge exports the OpenClaw trajectory, keeps only visible user/assistant
 text, converts it to the generic session schema, and calls the standalone core.
@@ -62,6 +72,8 @@ provider metadata.
 
 Answer only from returned active objects. Include relevant `object_id` values so
 the result is auditable. Do not silently fall back to OpenClaw memory search.
+An explicitly configured external provider may be used for deeper recall, but
+its result must retain or resolve to AML archive/object provenance.
 
 ## Validation
 

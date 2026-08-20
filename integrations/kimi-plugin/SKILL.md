@@ -10,12 +10,14 @@ durable information across separate sessions.
 
 ## Boundary
 
-The standalone ledger is the only memory write target. Do not store the test
-facts in `AGENTS.md`, another startup file, or another agent memory system. The
-adapter reads only visible `user` and `assistant` content from Kimi's
-`context.jsonl` or an exported session ZIP. It ignores `_system_prompt`,
-checkpoints, usage records, encrypted thinking, tool calls, tool results,
-`wire.jsonl`, and logs.
+The standalone ledger is the canonical memory write target. Do not store memory
+bodies in `AGENTS.md` or another startup file. When the operator explicitly
+configures external-memory mode, a separate provider may receive only sanitized
+evidence or derived objects after successful AML archival and must retain AML
+archive/object provenance. The adapter reads only visible `user` and `assistant`
+content from Kimi's `context.jsonl` or an exported session ZIP. It ignores
+`_system_prompt`, checkpoints, usage records, encrypted thinking, tool calls,
+tool results, `wire.jsonl`, and logs.
 
 Install this plugin with:
 
@@ -46,15 +48,24 @@ LEDGER="$PWD/.portable-memory"
 The bridge locates the newest Kimi session for the current working directory.
 Pass `--session-id` when an exact session is known.
 
+Archive when the user gives the configured explicit trigger. First extract
+durable `semantic`, `procedural`, and `event` candidates into a JSON file as
+described in `docs/AGENT_INSTRUCTIONS.md`. Set `promote: true` only for the
+small set of stable, high-value items that should be discoverable at startup.
+
 ```bash
 "$PY" "$BRIDGE" archive \
   --workdir "$PWD" \
   --ledger "$LEDGER" \
-  --promote-markers
+  --candidate-file /path/to/memory-candidates.json
 ```
 
-Use `--promote-markers` only when the user explicitly supplied stable lines such
-as `Fact:`, `Rule:`, `Procedure:`, `Decision:`, `事实：`, `规则：`, or `流程：`.
+Every accepted active candidate is represented in the dark ledger. The bridge
+uses candidate `promote` values to build the bright ledger. Add
+`--promote-markers` only when the user explicitly supplied stable lines such as
+`Fact:`, `Rule:`, `Procedure:`, `Decision:`, `事实：`, `规则：`, or `流程：`.
+Never edit evidence, objects, ledgers, SQLite, or the journal directly. Run
+validation after archival and report the archive, object, and promoted IDs.
 
 An exported ZIP can also be archived deterministically:
 
@@ -62,7 +73,7 @@ An exported ZIP can also be archived deterministically:
 "$PY" "$BRIDGE" archive-zip \
   --export-zip /path/to/session.zip \
   --ledger "$LEDGER" \
-  --promote-markers
+  --candidate-file /path/to/memory-candidates.json
 ```
 
 ## Recall
@@ -75,7 +86,9 @@ An exported ZIP can also be archived deterministically:
 ```
 
 Answer only from returned active objects and include relevant `object_id` values.
-Do not silently use previous Kimi sessions or another memory source.
+Do not silently use previous Kimi sessions or another memory source. An
+explicitly configured external provider may be used for deeper recall, but its
+result must retain or resolve to AML archive/object provenance.
 
 ## Validate
 

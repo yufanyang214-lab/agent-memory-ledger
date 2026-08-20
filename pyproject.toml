@@ -19,13 +19,6 @@ classifiers = [
 ]
 dependencies = []
 
-[project.optional-dependencies]
-chroma = [
-  "chromadb>=1.5.9,<2",
-  "fastembed>=0.8,<0.9",
-  "socksio>=1,<2",
-]
-
 [project.scripts]
 agent-memory-ledger = "agent_memory_ledger.cli:main"
 aml = "agent_memory_ledger.cli:main"

@@ -10,31 +10,17 @@ from typing import Any
 from .models import Library, SessionBundle
 from .ports import load_plugin
 from .service import MemoryLedger
-from .store import WorkspaceStore
 
 
 def _print(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
 
-def _add_semantic_args(parser: argparse.ArgumentParser) -> None:
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
+def _add_plugin_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
         "--semantic-plugin",
         help="optional semantic-index adapter as module:factory or plugin.py:factory",
     )
-    group.add_argument(
-        "--semantic-provider",
-        choices=["chroma", "none"],
-        help=(
-            "first-party semantic provider; 'chroma' can be persisted by init, "
-            "and 'none' disables a configured provider for this command"
-        ),
-    )
-
-
-def _add_plugin_args(parser: argparse.ArgumentParser) -> None:
-    _add_semantic_args(parser)
     parser.add_argument(
         "--extractor-plugin",
         help="optional session-to-memory extractor as module:factory or plugin.py:factory",
@@ -53,8 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    init = subparsers.add_parser("init", help="initialize a memory workspace")
-    _add_semantic_args(init)
+    subparsers.add_parser("init", help="initialize a memory workspace")
 
     ingest = subparsers.add_parser("ingest", help="archive a JSON/JSONL session")
     ingest.add_argument("session_file")
@@ -68,13 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     search = subparsers.add_parser("search", help="search memory objects")
     search.add_argument("query")
     search.add_argument("--top-k", type=int, default=10)
-    search.add_argument(
-        "--scope",
-        choices=["active", "bright"],
-        default="active",
-        help="search all active objects or only promoted bright-ledger objects",
-    )
-    _add_semantic_args(search)
+    _add_plugin_args(search)
 
     list_parser = subparsers.add_parser("list", help="list active memory objects")
     list_parser.add_argument("--kind", choices=["semantic", "procedural", "event"])
@@ -86,18 +65,16 @@ def build_parser() -> argparse.ArgumentParser:
     promote = subparsers.add_parser("promote", help="add an object to the bright ledger")
     promote.add_argument("object_id")
     promote.add_argument("--reason", default="manual")
-    _add_semantic_args(promote)
 
     retract = subparsers.add_parser("retract", help="retract an object without deleting evidence")
     retract.add_argument("object_id")
     retract.add_argument("--reason", required=True)
-    _add_semantic_args(retract)
 
     validate = subparsers.add_parser("validate", help="validate workspace consistency")
-    _add_semantic_args(validate)
+    _add_plugin_args(validate)
 
     reindex = subparsers.add_parser("reindex", help="rebuild an optional semantic index")
-    _add_semantic_args(reindex)
+    _add_plugin_args(reindex)
 
     return parser
 
@@ -110,23 +87,6 @@ def _make_ledger(args: argparse.Namespace) -> MemoryLedger:
     extractor_spec = getattr(args, "extractor_plugin", None)
     if semantic_spec:
         semantic_index = load_plugin(semantic_spec, workspace.resolve())
-    else:
-        provider = getattr(args, "semantic_provider", None)
-        if provider is None:
-            provider = os.environ.get("AML_SEMANTIC_PROVIDER")
-        if provider is None:
-            provider = WorkspaceStore(workspace).configured_semantic_provider()
-        if provider == "none":
-            provider = None
-        if provider == "chroma":
-            from .chroma_index import create_index
-
-            semantic_index = create_index(workspace.resolve())
-        elif provider is not None:
-            raise ValueError(
-                "semantic provider must be 'chroma' or 'none'; "
-                f"received {provider!r}"
-            )
     if extractor_spec:
         extractor = load_plugin(extractor_spec, workspace.resolve())
     return MemoryLedger(
@@ -143,33 +103,14 @@ def main(argv: list[str] | None = None) -> int:
         ledger = _make_ledger(args)
         if args.command == "init":
             ledger.store.initialize()
-            selected_provider = getattr(args, "semantic_provider", None)
-            if selected_provider is not None:
-                ledger.store.configure_semantic_provider(
-                    None if selected_provider == "none" else selected_provider
-                )
-            _print(
-                {
-                    "status": "initialized",
-                    "workspace": str(ledger.workspace),
-                    "semantic_provider": (
-                        ledger.store.configured_semantic_provider() or "none"
-                    ),
-                }
-            )
+            _print({"status": "initialized", "workspace": str(ledger.workspace)})
             return 0
         if args.command == "ingest":
             session = SessionBundle.from_path(args.session_file)
             _print(ledger.ingest(session, library=args.library))
             return 0
         if args.command == "search":
-            _print(
-                ledger.search(
-                    args.query,
-                    top_k=args.top_k,
-                    scope=args.scope,
-                )
-            )
+            _print(ledger.search(args.query, top_k=args.top_k))
             return 0
         if args.command == "list":
             promoted = True if args.bright else None

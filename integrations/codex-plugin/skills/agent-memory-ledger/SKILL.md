@@ -10,11 +10,14 @@ information across separate Codex sessions.
 
 ## Boundary
 
-The standalone ledger is the only memory write target. Do not enable or call
-Codex experimental memories, and do not copy memory into `AGENTS.md` or other
-startup instructions. The adapter reads only visible user and assistant events
-from the current rollout. It excludes developer instructions, hidden reasoning,
-tool calls, command output, plugin recommendations, and model metadata.
+The standalone ledger is the canonical memory write target. Do not enable or
+call Codex experimental memories, and do not copy memory bodies into `AGENTS.md`
+or other startup instructions. An external memory provider may receive only
+sanitized evidence or derived objects after successful AML archival when the
+operator explicitly configured external-memory mode. The adapter reads only
+visible user and assistant events from the current rollout. It excludes
+developer instructions, hidden reasoning, tool calls, command output, plugin
+recommendations, and model metadata.
 
 Resolve `SKILL_DIR` as the absolute directory containing this loaded
 `SKILL.md`. Codex exposes the skill location in its skill metadata; do not
@@ -42,16 +45,24 @@ LEDGER="$PWD/.portable-memory"
 `CODEX_THREAD_ID` is provided to shell commands by Codex CLI, so the bridge can
 locate the current rollout without asking the user for a session path.
 
+Archive when the user gives the configured explicit trigger. Before running the
+bridge, extract durable `semantic`, `procedural`, and `event` candidates into a
+JSON file as described in `docs/AGENT_INSTRUCTIONS.md`. Set `promote: true` only
+for the small set of stable, high-value items that should be discoverable at
+startup.
+
 ```bash
 "$PY" "$BRIDGE" archive \
   --ledger "$LEDGER" \
-  --promote-markers
+  --candidate-file /path/to/memory-candidates.json
 ```
 
-Use `--promote-markers` only when the user explicitly supplied stable lines such
-as `Fact:`, `Rule:`, `Procedure:`, `Decision:`, `事实：`, `规则：`, or `流程：`.
-It promotes extracted semantic/procedural objects; ordinary session events stay
-in the dark ledger.
+Every accepted active candidate is represented in the dark ledger. The bridge
+uses candidate `promote` values to build the bright ledger. Add
+`--promote-markers` only when the user explicitly supplied stable lines such as
+`Fact:`, `Rule:`, `Procedure:`, `Decision:`, `事实：`, `规则：`, or `流程：`.
+Never edit evidence, objects, ledgers, SQLite, or the journal directly. Run
+validation after archival and report the archive, object, and promoted IDs.
 
 ## Recall
 
@@ -64,6 +75,8 @@ in the dark ledger.
 
 Answer only from returned active objects and include relevant `object_id` values.
 Do not silently fall back to session history, Codex memories, or startup files.
+An explicitly configured external provider may be used for deeper recall, but
+its result must retain or resolve to AML archive/object provenance.
 
 ## Validate
 

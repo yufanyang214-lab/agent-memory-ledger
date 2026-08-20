@@ -494,35 +494,6 @@ class WorkspaceStore:
             raise KeyError(f"memory object not found: {object_id}")
         return memory_object
 
-    def configured_semantic_provider(self) -> str | None:
-        """Return the persisted first-party semantic provider, if configured."""
-        if not self.config_path.is_file():
-            return None
-        try:
-            config = json.loads(self.config_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid workspace config: {exc}") from exc
-        semantic_index = config.get("semantic_index")
-        if not isinstance(semantic_index, dict):
-            return None
-        provider = semantic_index.get("provider")
-        return str(provider) if provider else None
-
-    def configure_semantic_provider(self, provider: str | None) -> None:
-        """Persist or remove a first-party semantic provider selection."""
-        with self.write_lock():
-            self._initialize_unlocked()
-            config = json.loads(self.config_path.read_text(encoding="utf-8"))
-            if provider is None:
-                config.pop("semantic_index", None)
-            else:
-                config["semantic_index"] = {"provider": provider}
-            self._write_json_atomic(self.config_path, config)
-            self._append_journal_unlocked(
-                "workspace.semantic_provider_configured",
-                {"provider": provider or "none"},
-            )
-
     def list_objects(
         self, *, kind: str | None = None, promoted: bool | None = None
     ) -> list[MemoryObject]:
@@ -541,37 +512,24 @@ class WorkspaceStore:
             rows = con.execute(query, params).fetchall()
         return [self.require_object(str(row["object_id"])) for row in rows]
 
-    def search_fts(
-        self,
-        query: str,
-        top_k: int = 10,
-        *,
-        promoted: bool | None = None,
-    ) -> list[SearchHit]:
+    def search_fts(self, query: str, top_k: int = 10) -> list[SearchHit]:
         self.initialize()
         tokens = re.findall(r"[\w-]+", query, flags=re.UNICODE)
         if not tokens:
             return []
         fts_query = " OR ".join(f'"{token.replace(chr(34), "")}"' for token in tokens)
-        promoted_clause = ""
-        params: list[Any] = [fts_query]
-        if promoted is not None:
-            promoted_clause = " AND o.promoted = ?"
-            params.append(int(promoted))
-        params.append(max(1, int(top_k)))
         with self.connect() as con:
             rows = con.execute(
-                f"""
+                """
                 SELECT f.object_id, bm25(objects_fts) AS rank,
                        o.title, o.summary, o.kind
                 FROM objects_fts AS f
                 JOIN objects AS o ON o.object_id = f.object_id
                 WHERE objects_fts MATCH ? AND o.status = 'active'
-                {promoted_clause}
                 ORDER BY rank
                 LIMIT ?
                 """,
-                params,
+                (fts_query, max(1, int(top_k))),
             ).fetchall()
         return [
             SearchHit(

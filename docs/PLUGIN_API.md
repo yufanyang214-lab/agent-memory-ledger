@@ -105,27 +105,6 @@ aml --workspace ./memory search "query" \
 The repository includes a runnable standard-library example at
 `examples/overlap_index_plugin.py`.
 
-### Optional metadata filtering
-
-Existing adapters remain compatible with the original `SemanticIndex`
-interface. An adapter that can filter before ranking may additionally expose:
-
-```python
-def search_filtered(
-    self,
-    query: str,
-    top_k: int = 10,
-    *,
-    metadata: dict[str, object],
-) -> list[SearchHit]:
-    ...
-```
-
-The core currently calls this extension with `{"promoted": True}` for
-`search --scope bright`. A legacy adapter is oversampled and filtered while
-canonical results are hydrated, so adding this method is optional. The bundled
-Chroma adapter performs the filter inside its single collection.
-
 ## Adapter contract
 
 A semantic adapter should satisfy these behaviors:
@@ -141,12 +120,11 @@ A semantic adapter should satisfy these behaviors:
 
 ## Packaging suggestion
 
-The base package remains dependency-free. The bundled Chroma adapter is
-installed only through `agent-memory-ledger[chroma]`; other database adapters
-can stay outside the core package:
+Keep optional database adapters outside the core package:
 
 ```text
 agent-memory-ledger                 core package
+agent-memory-ledger-chroma          optional adapter
 agent-memory-ledger-qdrant          optional adapter
 agent-memory-ledger-pgvector        optional adapter
 ```
