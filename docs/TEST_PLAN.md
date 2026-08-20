@@ -23,6 +23,7 @@ The suite covers:
 - manual promotion and retraction;
 - retracted objects staying retracted after re-ingestion;
 - SQLite FTS recall;
+- active and bright search scopes, including pre-ranking metadata filters;
 - optional semantic-index adapters and failure fallback;
 - OpenClaw trajectory conversion that excludes runtime prompts, hidden thinking,
   tool calls, and tool results;
@@ -47,6 +48,30 @@ fresh home directory, runs outside the source checkout, and verifies:
 - raw transcript text is not duplicated into the generated archive event.
 
 This test runs in GitHub Actions on Python 3.11 and 3.12.
+
+## Optional Chroma integration
+
+The `chroma` CI job installs `.[chroma]` on Python 3.11 and runs the full suite.
+Its deterministic embedding fixture avoids a model download while exercising a
+real Chroma 1.x client. It covers:
+
+- one collection with `promoted` metadata filtering;
+- persistence, delete, metadata update, and full rebuild;
+- eight independent process writers serialized by the workspace lock;
+- refusal of a known-stale query in a long-lived embedded process;
+- lazy provider construction and HTTP configuration parsing;
+- the base clean-room wheel containing neither Chroma nor FastEmbed.
+
+Model quality is a separate, opt-in check:
+
+```bash
+python scripts/chinese_retrieval_eval.py
+```
+
+It downloads the default ONNX model and evaluates eight fixed Chinese
+paraphrase queries plus bright-scope filtering. The test intentionally reports
+individual misses instead of treating a small smoke set as a universal quality
+claim.
 
 ## Level 3: clean Agent integration
 
@@ -102,12 +127,13 @@ The standalone module keeps that ordering while replacing private components:
 | semantic/procedural/events files | `objects/<kind>/<object_id>.json` |
 | pointer registry + root bright index | `ledgers/bright.jsonl` |
 | full dark memory corpus | `ledgers/dark.jsonl` |
-| OpenClaw memory index | bundled SQLite FTS, optional plugin index |
+| OpenClaw memory index | bundled SQLite FTS, optional Chroma or plugin index |
 | memory facade/eval | `aml validate` plus recall assertions |
 | Neat Freak consistency pass | intentionally omitted from v0.1 |
 
-The v0.1 scope intentionally leaves LLM extraction, vector databases, and
-cross-document consistency checking as plugins or later work.
+The v0.1 scope intentionally leaves LLM extraction and cross-document
+consistency checking as plugins or later work. Chroma is a first-party optional
+profile; other vector databases remain adapters.
 
 ## Cross-platform runtime tests
 

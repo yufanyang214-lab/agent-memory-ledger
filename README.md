@@ -7,7 +7,7 @@ It takes a session export, preserves a sanitized evidence copy, extracts structu
 - **Dark ledger**: every structured memory object and its provenance.
 - **Bright ledger**: only the small set of promoted entries an agent should discover quickly.
 
-The project is intentionally independent of agent runtimes and memory databases. It runs with the Python standard library, uses SQLite FTS for built-in search, and exposes optional plugins for LLM extraction and vector search.
+The core is intentionally independent of agent runtimes and memory databases. It runs with the Python standard library, uses SQLite FTS for built-in search, exposes optional plugins, and offers a first-party Chroma extra for local Chinese semantic retrieval.
 
 ## Why
 
@@ -39,7 +39,7 @@ Extractor (built-in or plugin)
         └── ledgers/bright.jsonl           promoted entry points
         │
         ├── SQLite FTS                      built-in, rebuildable search
-        └── SemanticIndex plugin            optional vector database
+        └── SemanticIndex                   optional Chroma or custom adapter
 ```
 
 The filesystem is the source of truth. SQLite and vector indexes are derived and replaceable.
@@ -55,6 +55,8 @@ The filesystem is the source of truth. SQLite and vector indexes are derived and
 - Human-readable evidence manifests and transcripts.
 - Bright/dark ledger snapshots plus an append-only audit journal.
 - SQLite FTS5 search with no external service.
+- Optional one-command Chroma + lightweight ONNX Chinese embeddings.
+- Active and bright search scopes, with vector metadata filtering before ranking.
 - Optional extractor and semantic-index plugins.
 - Retraction without deleting original evidence.
 - Workspace consistency validation.
@@ -72,6 +74,25 @@ aml --workspace .demo-memory search "filesystem source of truth"
 aml --workspace .demo-memory list --bright
 aml --workspace .demo-memory validate
 ```
+
+SQLite is part of Python's standard library, so the base install does not
+download a database package. Chroma remains optional:
+
+```bash
+pip install -e ".[chroma]"
+
+# Persist the provider once; later ingest/search/promote/retract commands reuse it.
+aml --workspace .demo-memory init --semantic-provider chroma
+aml --workspace .demo-memory ingest examples/session.json
+aml --workspace .demo-memory search "会话存档的名字" --scope active
+aml --workspace .demo-memory search "启动时优先看的记忆" --scope bright
+```
+
+The first semantic operation downloads the default
+`BAAI/bge-small-zh-v1.5` ONNX model (about 90 MB installed). It is Chinese
+focused, runs on CPU through FastEmbed, and avoids PyTorch/CUDA. Chroma's
+English default embedding is never used. See [`docs/CHROMA.md`](docs/CHROMA.md)
+for server mode, model replacement, and concurrency limits.
 
 ## Agent runtime adapters
 
@@ -204,16 +225,19 @@ The built-in extractor also recognizes lines prefixed with markers such as `Fact
 ```text
 aml init
 aml ingest SESSION_FILE [--library auto|primary|auxiliary|ignored]
-aml search QUERY [--top-k N]
+aml search QUERY [--top-k N] [--scope active|bright]
 aml list [--kind semantic|procedural|event] [--bright]
 aml show OBJECT_ID
 aml promote OBJECT_ID [--reason TEXT]
 aml retract OBJECT_ID --reason TEXT
-aml reindex --semantic-plugin module:factory
+aml reindex [--semantic-provider chroma | --semantic-plugin module:factory]
 aml validate
 ```
 
-All commands accept `--workspace PATH`. `AML_WORKSPACE` may also set the default workspace.
+All commands accept `--workspace PATH`. `AML_WORKSPACE` may also set the default
+workspace. `AML_SEMANTIC_PROVIDER=chroma` can select Chroma without persisting a
+workspace setting; `--semantic-provider none` temporarily disables it, while
+`aml init --semantic-provider none` removes the persisted selection.
 
 ## Plugins
 
@@ -223,6 +247,10 @@ Two small interfaces are public:
 - `SemanticIndex`: text records and query text → optional semantic retrieval.
 
 A semantic adapter owns its embedding model and vector database. The core only sends sanitized records, receives object IDs, and hydrates final results from the canonical filesystem objects.
+
+The first-party shortcut is `--semantic-provider chroma`. A supplied
+`--semantic-plugin` still supports an Agent's existing vector database and
+overrides the persisted first-party provider for that command.
 
 ```bash
 # Installed adapter package
@@ -247,6 +275,13 @@ Mutating operations acquire an operating-system file lock at
 to evidence, objects, SQLite, ledgers, and the audit journal. Snapshot files use
 unique same-directory temporary files followed by an atomic replace. Direct
 writes that bypass the Agent Memory Ledger API are not covered by this lock.
+
+The Chroma adapter uses the same lock so delayed index updates cannot overwrite
+newer canonical metadata. Embedded Chroma works for one long-lived process or
+independent short-lived CLI processes. Because Chroma's local client is not
+process-safe, a generation guard rejects a known-stale vector operation after
+another process writes. Multiple long-lived Agents should use one Chroma server
+through `AML_CHROMA_MODE=http`.
 
 ## Design rules
 
@@ -274,6 +309,13 @@ Adapters for individual agent platforms and databases can live in separate packa
 PYTHONPATH=src python -m unittest discover -s tests -v
 python -m compileall -q src tests scripts
 python scripts/clean_room_smoke.py
+
+# Optional integration environment; does not download the embedding model.
+pip install -e ".[chroma]"
+python -m unittest discover -s tests -p 'test_chroma_index.py' -v
+
+# Reproducible real-model Chinese evaluation (downloads/caches the ONNX model).
+python scripts/chinese_retrieval_eval.py
 ```
 
 The clean-room smoke test builds a wheel, installs it into a fresh virtual
@@ -288,7 +330,7 @@ The design was distilled from a private Conversation Archiving Protocol and a br
 
 ## 中文说明
 
-这是一个刻意保持轻量的 Agent 记忆模块：输入任意平台导出的 session，保存脱敏证据，提炼 `semantic / procedural / event` 三类对象，并生成明账与暗账。默认只依赖文件系统和 SQLite；向量库、Embedding 和 LLM 提炼器都通过插件接入，因此不会绑定某个 Agent 平台或记忆系统。
+这是一个刻意保持轻量的 Agent 记忆模块：输入任意平台导出的 session，保存脱敏证据，提炼 `semantic / procedural / event` 三类对象，并生成明账与暗账。基础安装只依赖文件系统和 Python 自带的 SQLite；`[chroma]` 是可选的一键增强，默认使用约 90 MB 的中文 ONNX Embedding，不安装 PyTorch。明账检索会在向量排序前按 `promoted=true` 过滤，普通检索覆盖全部活跃暗账对象；已有向量库仍可通过 `SemanticIndex` 插件接入。
 
 ## License
 

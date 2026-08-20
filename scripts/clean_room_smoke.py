@@ -60,6 +60,20 @@ def main() -> int:
                 if key in os.environ:
                     child_env[key] = os.environ[key]
         call([str(python), "-m", "pip", "install", "--no-deps", str(wheels[0])], agent, child_env)
+        optional_modules = call(
+            [
+                str(python),
+                "-c",
+                (
+                    "import importlib.util,json; "
+                    "print(json.dumps({name: importlib.util.find_spec(name) is not None "
+                    "for name in ('chromadb','fastembed')}))"
+                ),
+            ],
+            agent,
+            child_env,
+            True,
+        )
 
         session = {
             "session_id": "clean-agent-session-001",
@@ -124,6 +138,10 @@ def main() -> int:
             "bright_ledger": bright_path.is_file() and count(bright_path) >= 2,
             "dark_ledger": dark_path.is_file() and count(dark_path) >= 3,
             "sqlite": (memory / "state/catalog.sqlite3").is_file(),
+            "base_install_without_chroma": optional_modules == {
+                "chromadb": False,
+                "fastembed": False,
+            },
             "restart_recall": bool(searched),
             "fts": any("fts" in item.get("retrieval_sources", []) for item in searched),
             "plugin": any("overlap-example" in item.get("retrieval_sources", []) for item in searched),

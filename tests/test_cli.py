@@ -55,6 +55,10 @@ class CliTests(unittest.TestCase):
         self.assertTrue(hits)
         self.assertTrue(any(item["kind"] == "semantic" for item in hits))
 
+        bright_hits = self._run("search", "verification", "--scope", "bright")
+        self.assertTrue(bright_hits)
+        self.assertTrue(all(item["promoted"] for item in bright_hits))
+
         bright = self._run("list", "--bright")
         self.assertEqual([item["title"] for item in bright], ["CLI verification"])
 
@@ -69,6 +73,21 @@ class CliTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["status"], "error")
         self.assertIn("ValueError", payload["error"])
+
+    def test_init_can_persist_and_remove_chroma_provider(self) -> None:
+        initialized = self._run("init", "--semantic-provider", "chroma")
+        self.assertEqual(initialized["semantic_provider"], "chroma")
+        config = json.loads(
+            (self.workspace / "workspace.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(config["semantic_index"], {"provider": "chroma"})
+
+        disabled = self._run("init", "--semantic-provider", "none")
+        self.assertEqual(disabled["semantic_provider"], "none")
+        config = json.loads(
+            (self.workspace / "workspace.json").read_text(encoding="utf-8")
+        )
+        self.assertNotIn("semantic_index", config)
 
     def _run(self, *args: str) -> object:
         completed = self._run_raw(*args)

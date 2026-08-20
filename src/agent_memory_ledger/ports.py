@@ -45,6 +45,25 @@ class SemanticIndex(Protocol):
         ...
 
 
+@runtime_checkable
+class FilteredSemanticIndex(Protocol):
+    """Optional extension for indexes that can filter before vector ranking.
+
+    Keeping this separate from :class:`SemanticIndex` preserves compatibility
+    with existing adapters. The core currently uses it for bright-ledger recall
+    by passing ``{"promoted": True}``.
+    """
+
+    def search_filtered(
+        self,
+        query: str,
+        top_k: int = 10,
+        *,
+        metadata: dict[str, Any],
+    ) -> list[SearchHit]:
+        ...
+
+
 def load_plugin(spec: str, workspace: Path) -> Any:
     """Load ``module:factory`` or ``path/to/plugin.py:factory``.
 
