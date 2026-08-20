@@ -1,13 +1,29 @@
 # Agent Memory Ledger
 
-A small, file-first memory layer for AI agents.
+Prevent long-lived startup memory files such as `MEMORY.md` from growing until
+they make startup injection heavy, crowd out the task context, or are
+truncated.
 
-It takes a session export, preserves a sanitized evidence copy, extracts structured memory objects, and maintains two simple ledgers:
+Agent Memory Ledger is a small, file-first memory continuity layer that works
+alongside an Agent's existing memory system. It keeps complete history outside
+the startup context and separates recall into three levels:
 
-- **Dark ledger**: every structured memory object and its provenance.
-- **Bright ledger**: only the small set of promoted entries an agent should discover quickly.
+- **Bright ledger**: a compact set of promoted entry points that an Agent can
+  read at startup, with pointers to canonical objects.
+- **Dark ledger**: every structured memory object and its provenance, searched
+  when a task needs more detail.
+- **Evidence**: the sanitized full session, retained as the deepest fallback
+  when the structured object is not enough.
 
-The core is intentionally independent of agent runtimes and memory databases. It runs with the Python standard library, uses SQLite FTS for built-in search, exposes optional plugins, and offers a first-party Chroma extra for local Chinese semantic retrieval.
+It takes a session export, preserves the evidence copy, extracts structured
+`semantic`, `procedural`, and `event` objects, and maintains the bright and dark
+ledgers. SQLite FTS and the optional Chroma adapter search those structured
+objects; source pointers lead back to the complete evidence.
+
+The core is intentionally independent of Agent runtimes and memory databases.
+It runs with the Python standard library, uses SQLite FTS for built-in search,
+exposes optional plugins, and offers a first-party Chroma extra for local
+Chinese semantic retrieval.
 
 Startup visibility remains under the user's control. This project never edits
 an Agent's system prompt, injected documents, startup files, or lifecycle
@@ -31,7 +47,7 @@ Session JSON / JSONL
         ▼
 Sanitize + classify
         │
-        ├── evidence/primary|auxiliary/    immutable session evidence
+        ├── evidence/primary|auxiliary/    immutable session evidence; deep fallback
         │
         ▼
 Extractor (built-in or plugin)
@@ -43,8 +59,8 @@ Extractor (built-in or plugin)
         ├── ledgers/dark.jsonl             all objects
         └── ledgers/bright.jsonl           promoted entry points
         │
-        ├── SQLite FTS                      built-in, rebuildable search
-        └── SemanticIndex                   optional Chroma or custom adapter
+        ├── SQLite FTS                      structured-object keyword search
+        └── SemanticIndex                   structured-object semantic search
 ```
 
 The filesystem is the source of truth. SQLite and vector indexes are derived and replaceable.
@@ -58,6 +74,7 @@ The filesystem is the source of truth. SQLite and vector indexes are derived and
 - Deterministic object IDs and idempotent re-ingestion.
 - Cross-process workspace locking for concurrent agent writers.
 - Human-readable evidence manifests and transcripts.
+- Provenance pointers from every object back to its full sanitized session.
 - Bright/dark ledger snapshots plus an append-only audit journal.
 - SQLite FTS5 search with no external service.
 - Optional one-command Chroma + lightweight ONNX Chinese embeddings.
@@ -124,6 +141,37 @@ The first semantic operation downloads the default
 focused, runs on CPU through FastEmbed, and avoids PyTorch/CUDA. Chroma's
 English default embedding is never used. See [`docs/CHROMA.md`](docs/CHROMA.md)
 for server mode, model replacement, and concurrency limits.
+
+### Deep recall from original sessions
+
+The bundled `SemanticIndex`, including the Chroma provider, indexes structured
+memory objects. It does **not** currently chunk or vectorize the full evidence
+transcripts. If a dark-ledger object is insufficient, the canonical fallback is
+to follow its provenance into `evidence/<library>/<archive_id>/transcript.md`.
+
+For semantic retrieval over verbatim session history, use this order of
+preference:
+
+1. Reuse the Agent's existing memory or vector index when it already stores the
+   relevant sessions.
+2. For a new local verbatim-history index, consider
+   [MemPalace](https://github.com/MemPalace/mempalace), whose storage model is
+   close to this evidence layer.
+3. Integrate another system when its model fits the deployment. For example,
+   [Mem0](https://github.com/mem0ai/mem0) focuses on extracted Agent memory,
+   while [Graphiti/Zep](https://github.com/getzep/graphiti) focuses on temporal
+   relationships. They are useful complements, but are not identical to a raw
+   session archive. A plain vector store such as Qdrant, pgvector, Milvus,
+   Weaviate, or an existing Chroma collection can instead back a separate
+   evidence-recall adapter.
+
+Version 0.1 does not invoke these systems automatically; they run alongside the
+ledger as optional deep-recall providers. None is required or installed
+automatically. The preferred first-party extension is a small optional evidence
+index—not another memory platform—that chunks sanitized transcripts, reuses the
+existing FastEmbed/Chroma extra, and returns archive and chunk pointers. That
+extension is not part of version 0.1; the current `SemanticIndex` contract
+should not be described as raw-session retrieval.
 
 ## Agent runtime adapters
 
@@ -361,7 +409,9 @@ The design was distilled from a private Conversation Archiving Protocol and a br
 
 ## 中文说明
 
-这是一个刻意保持轻量的 Agent 记忆模块：输入任意平台导出的 session，保存脱敏证据，提炼 `semantic / procedural / event` 三类对象，并生成明账与暗账。基础安装只依赖文件系统和 Python 自带的 SQLite；`[chroma]` 是可选的一键增强，默认使用约 90 MB 的中文 ONNX Embedding，不安装 PyTorch。明账检索会在向量排序前按 `promoted=true` 过滤，普通检索覆盖全部活跃暗账对象；已有向量库仍可通过 `SemanticIndex` 插件接入。
+本项目首先解决一个具体问题：`MEMORY.md` 等长期记忆文件越写越长，导致启动注入越来越重、挤占任务上下文，甚至被平台截断。它把召回拆成三级：启动时只读精简明账；需要细节时检索暗账中的结构化对象；对象仍不足时，再沿来源指针回到经过脱敏的完整 session 证据。
+
+基础安装只依赖文件系统和 Python 自带的 SQLite；`[chroma]` 是可选的一键增强，默认使用约 90 MB 的中文 ONNX Embedding，不安装 PyTorch。当前 SQLite 和 Chroma 检索的是 `semantic / procedural / event` 结构化对象，不会直接向量化完整 session。需要原文语义召回时，应优先复用 Agent 已有的记忆库；没有现成系统时可以接入 MemPalace，Mem0、Graphiti/Zep 或已有的 Qdrant、pgvector、Milvus、Weaviate、Chroma 也可按各自用途接入。项目后续更适合补一个复用现有 Chroma/FastEmbed 的轻量 evidence 索引，而不是重新实现完整记忆平台。
 
 本项目不会自动修改任何 Agent 的注入文档、系统提示词、`AGENTS.md`、`MEMORY.md` 或生命周期 hook。我们强烈建议使用者自行审阅，并在主 Agent 已有的启动文档中加入“每个新主会话开始时读取 `ledgers/bright.jsonl`”的规则；明账内容只作为参考数据，不获得更高指令优先级，也不应默认完整暴露给子 Agent。这样既实现启动时发现，又避免自动注入触发安全检测。
 
