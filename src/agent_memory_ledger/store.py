@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
+import tempfile
+import threading
+from contextlib import contextmanager
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, BinaryIO, Iterable, Iterator
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 from .models import (
     IndexRecord,
@@ -29,9 +38,17 @@ class WorkspaceStore:
         self.state_dir = self.root / "state"
         self.db_path = self.state_dir / "catalog.sqlite3"
         self.journal_path = self.state_dir / "journal.jsonl"
+        self.lock_path = self.state_dir / "workspace.lock"
         self.config_path = self.root / "workspace.json"
+        self._thread_lock = threading.RLock()
+        self._lock_depth = 0
+        self._lock_handle: BinaryIO | None = None
 
     def initialize(self) -> None:
+        with self.write_lock():
+            self._initialize_unlocked()
+
+    def _initialize_unlocked(self) -> None:
         for library in ("primary", "auxiliary"):
             (self.evidence_dir / library).mkdir(parents=True, exist_ok=True)
         for kind in MemoryKind:
@@ -103,14 +120,68 @@ class WorkspaceStore:
             )
         self.sync_ledgers()
 
+    @contextmanager
+    def write_lock(self) -> Iterator[None]:
+        """Serialize workspace mutations across threads and agent processes."""
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        with self._thread_lock:
+            outermost = self._lock_depth == 0
+            if outermost:
+                handle = self.lock_path.open("a+b")
+                try:
+                    self._acquire_file_lock(handle)
+                except Exception:
+                    handle.close()
+                    raise
+                self._lock_handle = handle
+            self._lock_depth += 1
+            try:
+                yield
+            finally:
+                self._lock_depth -= 1
+                if outermost:
+                    handle = self._lock_handle
+                    self._lock_handle = None
+                    if handle is not None:
+                        try:
+                            self._release_file_lock(handle)
+                        finally:
+                            handle.close()
+
+    @staticmethod
+    def _acquire_file_lock(handle: BinaryIO) -> None:
+        if os.name == "nt":
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            return
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+    @staticmethod
+    def _release_file_lock(handle: BinaryIO) -> None:
+        if os.name == "nt":
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            return
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
     def connect(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.db_path)
+        con = sqlite3.connect(self.db_path, timeout=30.0)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys = ON")
         con.execute("PRAGMA journal_mode = WAL")
         return con
 
     def archive_session(self, session: SessionBundle, library: str) -> dict[str, Any]:
+        with self.write_lock():
+            return self._archive_session_unlocked(session, library)
+
+    def _archive_session_unlocked(
+        self, session: SessionBundle, library: str
+    ) -> dict[str, Any]:
         self.initialize()
         payload = session.to_dict()
         canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -139,8 +210,9 @@ class WorkspaceStore:
                 "files": ["session.json", "transcript.md", "manifest.json"],
             }
             self._write_json_atomic(archive_dir / "session.json", payload)
-            (archive_dir / "transcript.md").write_text(
-                self._render_transcript(session, library), encoding="utf-8"
+            self._write_text_atomic(
+                archive_dir / "transcript.md",
+                self._render_transcript(session, library),
             )
             self._write_json_atomic(manifest_path, manifest)
         else:
@@ -151,8 +223,9 @@ class WorkspaceStore:
             if not (archive_dir / "session.json").is_file():
                 self._write_json_atomic(archive_dir / "session.json", payload)
             if not (archive_dir / "transcript.md").is_file():
-                (archive_dir / "transcript.md").write_text(
-                    self._render_transcript(session, library), encoding="utf-8"
+                self._write_text_atomic(
+                    archive_dir / "transcript.md",
+                    self._render_transcript(session, library),
                 )
 
         with self.connect() as con:
@@ -188,6 +261,22 @@ class WorkspaceStore:
         return manifest
 
     def put_object(
+        self,
+        draft: MemoryDraft,
+        *,
+        archive_id: str,
+        session_id: str,
+        source_platform: str,
+    ) -> MemoryObject:
+        with self.write_lock():
+            return self._put_object_unlocked(
+                draft,
+                archive_id=archive_id,
+                session_id=session_id,
+                source_platform=source_platform,
+            )
+
+    def _put_object_unlocked(
         self,
         draft: MemoryDraft,
         *,
@@ -327,6 +416,12 @@ class WorkspaceStore:
         return memory_object
 
     def promote(self, object_id: str, reason: str = "manual") -> MemoryObject:
+        with self.write_lock():
+            return self._promote_unlocked(object_id, reason=reason)
+
+    def _promote_unlocked(
+        self, object_id: str, reason: str = "manual"
+    ) -> MemoryObject:
         memory_object = self.require_object(object_id)
         memory_object.promoted = True
         memory_object.updated_at = utc_now()
@@ -346,6 +441,10 @@ class WorkspaceStore:
         return memory_object
 
     def retract(self, object_id: str, reason: str) -> MemoryObject:
+        with self.write_lock():
+            return self._retract_unlocked(object_id, reason=reason)
+
+    def _retract_unlocked(self, object_id: str, reason: str) -> MemoryObject:
         memory_object = self.require_object(object_id)
         memory_object.status = "retracted"
         memory_object.promoted = False
@@ -464,6 +563,10 @@ class WorkspaceStore:
         return records
 
     def sync_ledgers(self) -> None:
+        with self.write_lock():
+            self._sync_ledgers_unlocked()
+
+    def _sync_ledgers_unlocked(self) -> None:
         if not self.db_path.exists():
             return
         dark_entries: list[dict[str, Any]] = []
@@ -513,6 +616,10 @@ class WorkspaceStore:
         self._write_jsonl_atomic(self.ledgers_dir / "bright.jsonl", bright_entries)
 
     def validate(self) -> dict[str, Any]:
+        with self.write_lock():
+            return self._validate_unlocked()
+
+    def _validate_unlocked(self) -> dict[str, Any]:
         self.initialize()
         errors: list[str] = []
         warnings: list[str] = []
@@ -582,6 +689,12 @@ class WorkspaceStore:
         }
 
     def append_journal(self, event_type: str, payload: dict[str, Any]) -> None:
+        with self.write_lock():
+            self._append_journal_unlocked(event_type, payload)
+
+    def _append_journal_unlocked(
+        self, event_type: str, payload: dict[str, Any]
+    ) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         entry = {
             "event_type": event_type,
@@ -616,19 +729,31 @@ class WorkspaceStore:
 
     @staticmethod
     def _write_json_atomic(path: Path, value: Any) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(path.suffix + ".tmp")
-        temp.write_text(
+        WorkspaceStore._write_text_atomic(
+            path,
             json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
         )
-        temp.replace(path)
 
     @staticmethod
     def _write_jsonl_atomic(path: Path, entries: Iterable[dict[str, Any]]) -> None:
+        content = "".join(
+            json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n"
+            for entry in entries
+        )
+        WorkspaceStore._write_text_atomic(path, content)
+
+    @staticmethod
+    def _write_text_atomic(path: Path, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(path.suffix + ".tmp")
-        with temp.open("w", encoding="utf-8") as handle:
-            for entry in entries:
-                handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
-        temp.replace(path)
+        descriptor, temp_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(content)
+            temp_path.replace(path)
+        finally:
+            temp_path.unlink(missing_ok=True)
