@@ -186,7 +186,12 @@ def locate_context_file(
 def promote_marker_objects(ledger: MemoryLedger, result: dict[str, Any]) -> list[str]:
     promoted = list(result.get("promoted_object_ids", []))
     for item in result.get("objects", []):
-        if item.get("kind") not in {"semantic", "procedural"}:
+        if item.get("kind") not in {
+            "knowledge",
+            "procedure",
+            "semantic",
+            "procedural",
+        }:
             continue
         if "extracted-marker" not in item.get("tags", []):
             continue

@@ -90,7 +90,7 @@ class OpenClawBridgeTests(unittest.TestCase):
                 session_key="agent:clean-agent:subagent:write",
                 candidates=[
                     {
-                        "kind": "semantic",
+                        "kind": "knowledge",
                         "title": "Explicit candidate",
                         "content": "Candidate survives conversion.",
                     }

@@ -117,19 +117,25 @@ def classify_session(session: SessionBundle) -> Library:
 
 _MARKERS: tuple[tuple[re.Pattern[str], MemoryKind], ...] = (
     (
-        re.compile(r"^(?:semantic|fact|knowledge|结论|知识|事实)\s*[:：-]\s*(.+)$", re.I),
-        MemoryKind.SEMANTIC,
-    ),
-    (
         re.compile(
-            r"^(?:procedural|procedure|workflow|rule|步骤|流程|规则|做法)\s*[:：-]\s*(.+)$",
+            r"^(?:knowledge|semantic|fact|decision|conclusion|constraint|preference|"
+            r"知识|事实|决定|结论|约束|偏好)\s*[:：-]\s*(.+)$",
             re.I,
         ),
-        MemoryKind.PROCEDURAL,
+        MemoryKind.KNOWLEDGE,
     ),
     (
         re.compile(
-            r"^(?:event|decision|result|completed|事件|决定|结果|完成)\s*[:：-]\s*(.+)$",
+            r"^(?:procedure|procedural|workflow|rule|step|步骤|流程|规则|做法)"
+            r"\s*[:：-]\s*(.+)$",
+            re.I,
+        ),
+        MemoryKind.PROCEDURE,
+    ),
+    (
+        re.compile(
+            r"^(?:event|result|completed|milestone|incident|state[ -]?change|"
+            r"事件|结果|完成|里程碑|事故|状态变化|状态变更)\s*[:：-]\s*(.+)$",
             re.I,
         ),
         MemoryKind.EVENT,

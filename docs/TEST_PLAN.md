@@ -16,7 +16,9 @@ The suite covers:
 
 - JSON, JSONL, and generic session input;
 - evidence sanitization;
-- semantic, procedural, and event objects;
+- AML-defined knowledge, procedure, and event objects;
+- pre-0.1 semantic/procedural input aliases and workspace migration with stable
+  object IDs;
 - primary, auxiliary, and ignored routing;
 - bright-ledger promotion and dark-ledger registration;
 - duplicate ingestion and multi-source provenance;
@@ -88,7 +90,7 @@ The private system follows:
 
 ```text
 sanitized evidence
-  -> structured semantic/procedural/event material
+  -> structured knowledge/procedure/event material
   -> routing/promotion gate
   -> bright/dark lookup discipline
   -> retrieval acceptance
@@ -99,7 +101,7 @@ The standalone module keeps that ordering while replacing private components:
 | Private workflow component | Standalone equivalent |
 |---|---|
 | MemPalace raw archive | `evidence/<library>/<archive_id>/` |
-| semantic/procedural/events files | `objects/<kind>/<object_id>.json` |
+| legacy semantic/procedural/event files | canonical `objects/knowledge`, `objects/procedure`, and `objects/event` files |
 | pointer registry + root bright index | `ledgers/bright.jsonl` |
 | full dark memory corpus | `ledgers/dark.jsonl` |
 | OpenClaw memory index | bundled SQLite FTS, optional plugin index |

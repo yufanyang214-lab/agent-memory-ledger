@@ -148,7 +148,12 @@ def archive(args: argparse.Namespace) -> dict[str, Any]:
         promoted: list[str] = list(result.get("promoted_object_ids", []))
         if args.promote_markers:
             for item in result.get("objects", []):
-                if item.get("kind") not in {"semantic", "procedural"}:
+                if item.get("kind") not in {
+                    "knowledge",
+                    "procedure",
+                    "semantic",
+                    "procedural",
+                }:
                     continue
                 if "extracted-marker" not in item.get("tags", []):
                     continue
