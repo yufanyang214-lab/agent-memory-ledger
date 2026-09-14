@@ -101,7 +101,7 @@ class CodexBridgeTests(unittest.TestCase):
                 encoding="utf-8",
             )
             located = BRIDGE.locate_rollout("thread-hidden-name", tmp)
-            self.assertEqual(located, rollout)
+            self.assertEqual(located, rollout.resolve())
 
 
 if __name__ == "__main__":

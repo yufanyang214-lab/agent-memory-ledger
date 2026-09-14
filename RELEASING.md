@@ -11,6 +11,7 @@ python -m pip install -e .
 python -m unittest discover -s tests -v
 python -m compileall -q src tests scripts integrations
 python scripts/clean_room_smoke.py
+python -m pip install "setuptools>=61" wheel
 python scripts/build_release.py
 ```
 
@@ -19,6 +20,10 @@ plugin manifests agree, then creates a wheel and sdist with SHA-256 checksums
 under `dist/<version>/`. Runtime dependencies remain empty. Test the sdist's
 wheel too before release, so source packaging omissions cannot be hidden by a
 working-tree build.
+
+The explicit build-dependency installation is required in fresh Python
+environments: pip's isolated editable-install build does not install setuptools
+into the calling interpreter. These dependencies are only needed by builders.
 
 After the reviewed changes are merged and CI passes, create a new matching tag
 and release from that commit, attach the generated wheel, sdist, and checksum

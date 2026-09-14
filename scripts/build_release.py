@@ -22,7 +22,10 @@ def main() -> int:
     if project.get("dependencies"):
         raise ValueError("base package unexpectedly declares runtime dependencies")
     # setuptools is already the declared build dependency, not a runtime one.
-    from setuptools.build_meta import build_sdist, build_wheel
+    try:
+        from setuptools.build_meta import build_sdist, build_wheel
+    except ModuleNotFoundError as exc:
+        raise RuntimeError('Install build dependencies first: python -m pip install "setuptools>=61" wheel') from exc
 
     destination = root / "dist" / version
     destination.mkdir(parents=True, exist_ok=True)

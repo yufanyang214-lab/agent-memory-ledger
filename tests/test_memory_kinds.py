@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from agent_memory_ledger import MemoryLedger, SessionBundle
@@ -102,7 +103,7 @@ class MemoryKindTests(unittest.TestCase):
             )
             canonical_path.unlink()
 
-            with sqlite3.connect(ledger.store.db_path) as con:
+            with closing(sqlite3.connect(ledger.store.db_path)) as con, con:
                 con.execute(
                     "UPDATE objects SET object_id = ?, kind = 'semantic', "
                     "relative_path = ?, schema_version = 1 WHERE object_id = ?",
