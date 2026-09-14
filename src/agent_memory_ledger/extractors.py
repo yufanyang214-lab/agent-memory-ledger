@@ -22,6 +22,7 @@ _SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
             r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|"
+            r"github_pat_[A-Za-z0-9_]{30,}|"
             r"xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[A-Z0-9]{16})\b"
         ),
         "[REDACTED_TOKEN]",
@@ -48,8 +49,16 @@ class BasicSanitizer:
 
     def sanitize(self, session: SessionBundle) -> SessionBundle:
         clean = copy.deepcopy(session)
+        clean.session_id = self._sanitize_text(clean.session_id)
+        clean.source = self._sanitize_text(clean.source)
+        clean.session_type = self._sanitize_text(clean.session_type)
         for message in clean.messages:
             message.content = self._sanitize_text(message.content)
+            message.role = self._sanitize_text(message.role)
+            if message.message_id is not None:
+                message.message_id = self._sanitize_text(message.message_id)
+            if message.timestamp is not None:
+                message.timestamp = self._sanitize_text(message.timestamp)
             message.metadata = self._sanitize_mapping(message.metadata)
             if message.name:
                 message.name = self._sanitize_text(message.name)
@@ -72,9 +81,9 @@ class BasicSanitizer:
             result: dict[str, object] = {}
             for key, item in value.items():
                 if re.search(r"(?i)(password|secret|token|api[_-]?key)", str(key)):
-                    result[str(key)] = "[REDACTED]"
+                    result[self._sanitize_text(str(key))] = "[REDACTED]"
                 else:
-                    result[str(key)] = self._sanitize_mapping(item)
+                    result[self._sanitize_text(str(key))] = self._sanitize_mapping(item)
             return result
         if isinstance(value, list):
             return [self._sanitize_mapping(item) for item in value]

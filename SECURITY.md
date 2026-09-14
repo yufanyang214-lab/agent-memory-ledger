@@ -9,6 +9,11 @@ Agent Memory Ledger stores conversation-derived material on disk. Treat its work
 - Optional extractor and semantic-index plugins run with the permissions of the host process.
 - Vector adapters receive only the sanitized object text supplied by the core.
 - Original evidence is retained after a memory object is retracted.
+- Identifier fields, nested metadata keys, and audit payloads also pass through
+  built-in secret-pattern redaction. This does not anonymize all personal data.
+- Validation detects mismatches between evidence hashes, transcripts, canonical
+  objects, ledgers, and indexes. These local checks are not cryptographic proof
+  against an attacker who can rewrite the entire workspace.
 
 ## Recommended deployment
 
@@ -17,6 +22,8 @@ Agent Memory Ledger stores conversation-derived material on disk. Treat its work
 - Review third-party plugins before installation.
 - Use synthetic sessions in bug reports and tests.
 - Add application-specific redaction rules before importing regulated or highly sensitive data.
+- Keep recovery backups private too: `state/catalog-backups/` can contain older
+  indexed data. Upgrading does not retroactively sanitize existing archives.
 
 ## Reporting
 

@@ -10,3 +10,4 @@ dist/
 .agent-memory-ledger-venv/
 .agent-memory-ledger-adapter/
 .portable-memory/
+.agent-memory-ledger/

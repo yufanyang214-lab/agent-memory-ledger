@@ -48,7 +48,15 @@ fresh home directory, runs outside the source checkout, and verifies:
 - optional indexes are derived, not canonical;
 - raw transcript text is not duplicated into the generated archive event.
 
-This test runs in GitHub Actions on Python 3.11 and 3.12.
+The CI matrix runs Python 3.11 and 3.12 on Linux, and Python 3.12 on Windows.
+The installed-wheel smoke test also removes the catalog and ledger snapshots,
+then checks explicit recovery, persistent promotion/retraction, and recall.
+
+Release-fix regression tests additionally cover files-only restoration with
+multiple sources, corrupt database backup/replacement, read-only validation,
+evidence and object tampering, equal-count FTS drift, identifier redaction,
+unsupported future schemas, and Windows lock contention. See
+[`RECOVERY.md`](RECOVERY.md) for the recovery contract and limitations.
 
 ## Level 3: clean Agent integration
 

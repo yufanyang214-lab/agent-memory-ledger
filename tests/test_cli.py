@@ -74,6 +74,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["status"], "error")
         self.assertIn("ValueError", payload["error"])
 
+    def test_validate_and_reindex_work_when_catalog_is_missing(self) -> None:
+        self._run("ingest", str(self.session_path))
+        index = self.workspace / "state" / "catalog.sqlite3"
+        index.unlink()
+        checked = self._run_raw("validate")
+        self.assertEqual(checked.returncode, 2)
+        self.assertFalse(json.loads(checked.stdout)["ok"])
+        self.assertFalse(index.exists())
+        rebuilt = self._run("reindex")
+        self.assertEqual(rebuilt["status"], "completed")
+        self.assertEqual(rebuilt["semantic_index"]["status"], "disabled")
+        self.assertTrue(self._run("validate")["ok"])
+        self.assertTrue(self._run("search", "durable memory"))
+
     def _run(self, *args: str) -> object:
         completed = self._run_raw(*args)
         if completed.returncode != 0:

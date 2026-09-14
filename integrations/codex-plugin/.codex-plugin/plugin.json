@@ -1,6 +1,6 @@
 {
   "name": "agent-memory-ledger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Standalone session archiving and bright/dark memory ledgers for Codex CLI.",
   "skills": "./skills/"
 }

@@ -229,7 +229,7 @@ def main() -> int:
         elif args.command == "recall":
             emit(MemoryLedger(Path(args.ledger).resolve()).search(args.query, top_k=args.top_k))
         elif args.command == "validate":
-            result = MemoryLedger(Path(args.ledger).resolve()).validate()
+            result = MemoryLedger(Path(args.ledger).resolve(), initialize=False).validate()
             emit(result)
             return 0 if result.get("ok") else 2
         elif args.command == "convert":

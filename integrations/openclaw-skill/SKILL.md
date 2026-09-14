@@ -21,7 +21,7 @@ Install the core package into a workspace-local virtual environment once:
 
 ```bash
 python skills/agent-memory-ledger/scripts/install.py \
-  --source /path/to/agent_memory_ledger-0.1.0-py3-none-any.whl
+  --source /path/to/agent_memory_ledger-0.1.1-py3-none-any.whl
 ```
 
 Then use these local paths:

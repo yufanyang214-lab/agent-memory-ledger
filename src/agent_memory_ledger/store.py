@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
 import sqlite3
 import tempfile
+import time
+import uuid
 import threading
 from contextlib import contextmanager
 from hashlib import sha256
@@ -16,6 +19,10 @@ if os.name == "nt":
 else:
     import fcntl
 
+from .extractors import BasicSanitizer
+from .integrity import (
+    SOURCE_IDS_KEY, fts_row, ledger_entries, object_row, read_snapshot, render_transcript,
+)
 from .models import (
     IndexRecord,
     MEMORY_KIND_ALIASES,
@@ -49,8 +56,79 @@ class WorkspaceStore:
         self._lock_handle: BinaryIO | None = None
 
     def initialize(self) -> None:
+        self._check_workspace_version()
         with self.write_lock():
+            self._check_workspace_version()
             self._initialize_unlocked()
+
+    def _check_workspace_version(self) -> None:
+        if not self.config_path.exists():
+            return
+        config = json.loads(self.config_path.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise ValueError("workspace.json must contain a JSON object")
+        version = config.get("schema_version", 1)
+        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+            raise ValueError("invalid workspace schema version")
+        if version > WORKSPACE_SCHEMA_VERSION:
+            raise ValueError(
+                f"unsupported workspace schema {version}; maximum is {WORKSPACE_SCHEMA_VERSION}"
+            )
+
+    @staticmethod
+    def _create_schema(con: sqlite3.Connection) -> None:
+        con.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS archives (
+                archive_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                library TEXT NOT NULL,
+                title TEXT,
+                content_hash TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS objects (
+                object_id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                content TEXT NOT NULL,
+                importance INTEGER NOT NULL,
+                confidence REAL NOT NULL,
+                tags_json TEXT NOT NULL,
+                aliases_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                promoted INTEGER NOT NULL DEFAULT 0,
+                relative_path TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                metadata_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS object_sources (
+                object_id TEXT NOT NULL,
+                archive_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                source_platform TEXT NOT NULL,
+                PRIMARY KEY (object_id, archive_id),
+                FOREIGN KEY (object_id) REFERENCES objects(object_id),
+                FOREIGN KEY (archive_id) REFERENCES archives(archive_id)
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(
+                object_id UNINDEXED,
+                title,
+                summary,
+                content,
+                tags
+            );
+            """
+        )
+
 
     def _initialize_unlocked(self) -> None:
         for library in ("primary", "auxiliary"):
@@ -71,61 +149,21 @@ class WorkspaceStore:
                     "dark_ledger": "ledgers/dark.jsonl",
                 },
             )
+        if not self.db_path.exists() and (
+            any(self.objects_dir.glob("*/*.json"))
+            or any(self.evidence_dir.glob("*/*"))
+        ):
+            result = self._rebuild_catalog_unlocked()
+            if result["status"] != "completed":
+                raise RuntimeError("catalog recovery refused: " + "; ".join(result["errors"]))
+            return
+        new_catalog = not self.db_path.exists()
         with self.connect() as con:
-            con.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS archives (
-                    archive_id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    library TEXT NOT NULL,
-                    title TEXT,
-                    content_hash TEXT NOT NULL,
-                    relative_path TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS objects (
-                    object_id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    summary TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    importance INTEGER NOT NULL,
-                    confidence REAL NOT NULL,
-                    tags_json TEXT NOT NULL,
-                    aliases_json TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    promoted INTEGER NOT NULL DEFAULT 0,
-                    relative_path TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    schema_version INTEGER NOT NULL,
-                    metadata_json TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS object_sources (
-                    object_id TEXT NOT NULL,
-                    archive_id TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
-                    source_platform TEXT NOT NULL,
-                    PRIMARY KEY (object_id, archive_id),
-                    FOREIGN KEY (object_id) REFERENCES objects(object_id),
-                    FOREIGN KEY (archive_id) REFERENCES archives(archive_id)
-                );
-
-                CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(
-                    object_id UNINDEXED,
-                    title,
-                    summary,
-                    content,
-                    tags
-                );
-                """
-            )
-        self._migrate_legacy_kinds_unlocked()
+            self._create_schema(con)
+        migrated = self._migrate_legacy_kinds_unlocked()
         self._upgrade_workspace_config_unlocked()
-        self.sync_ledgers()
+        if new_catalog or migrated:
+            self.sync_ledgers()
 
     @contextmanager
     def write_lock(self) -> Iterator[None]:
@@ -163,9 +201,23 @@ class WorkspaceStore:
                 handle.write(b"\0")
                 handle.flush()
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            WorkspaceStore._acquire_windows_lock(handle, msvcrt)
             return
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+    @staticmethod
+    def _acquire_windows_lock(handle: BinaryIO, locking_api: Any) -> None:
+        # LK_LOCK gives up after about ten seconds. Retry only contention;
+        # invalid handles and other permanent errors must still reach callers.
+        while True:
+            handle.seek(0)
+            try:
+                locking_api.locking(handle.fileno(), locking_api.LK_NBLCK, 1)
+                return
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise
+                time.sleep(0.05)
 
     @staticmethod
     def _release_file_lock(handle: BinaryIO) -> None:
@@ -175,14 +227,19 @@ class WorkspaceStore:
             return
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
         con = sqlite3.connect(self.db_path, timeout=30.0)
         con.row_factory = sqlite3.Row
-        con.execute("PRAGMA foreign_keys = ON")
-        con.execute("PRAGMA journal_mode = WAL")
-        return con
+        try:
+            con.execute("PRAGMA foreign_keys = ON")
+            con.execute("PRAGMA journal_mode = WAL")
+            with con:
+                yield con
+        finally:
+            con.close()
 
-    def _migrate_legacy_kinds_unlocked(self) -> None:
+    def _migrate_legacy_kinds_unlocked(self) -> bool:
         """Move pre-0.1 object files to canonical kind directories without changing IDs."""
         migrated: list[dict[str, str]] = []
         for legacy_kind, canonical_kind in MEMORY_KIND_ALIASES.items():
@@ -271,6 +328,8 @@ class WorkspaceStore:
                 "workspace.memory_kinds_migrated",
                 {"objects": migrated, "schema_version": WORKSPACE_SCHEMA_VERSION},
             )
+
+        return bool(migrated)
 
     def _upgrade_workspace_config_unlocked(self) -> None:
         config = json.loads(self.config_path.read_text(encoding="utf-8"))
@@ -449,6 +508,14 @@ class WorkspaceStore:
             **(existing.metadata if existing else {}),
             **dict(draft.metadata),
         }
+        source_ids = {archive_id, source_archive_id}
+        if existing:
+            source_ids.update(existing.metadata.get(SOURCE_IDS_KEY, []))
+            with self.connect() as con:
+                source_ids.update(row["archive_id"] for row in con.execute(
+                    "SELECT archive_id FROM object_sources WHERE object_id = ?", (object_id,)
+                ))
+        metadata[SOURCE_IDS_KEY] = sorted(source_ids)
         memory_object = MemoryObject(
             object_id=object_id,
             kind=draft.kind,
@@ -564,6 +631,8 @@ class WorkspaceStore:
         self, object_id: str, reason: str = "manual"
     ) -> MemoryObject:
         memory_object = self.require_object(object_id)
+        if memory_object.status != "active":
+            raise ValueError("cannot promote a retracted object")
         memory_object.promoted = True
         memory_object.updated_at = utc_now()
         self._write_json_atomic(
@@ -586,6 +655,7 @@ class WorkspaceStore:
             return self._retract_unlocked(object_id, reason=reason)
 
     def _retract_unlocked(self, object_id: str, reason: str) -> MemoryObject:
+        reason = BasicSanitizer._sanitize_text(reason)
         memory_object = self.require_object(object_id)
         memory_object.status = "retracted"
         memory_object.promoted = False
@@ -616,6 +686,10 @@ class WorkspaceStore:
         return memory_object
 
     def get_object(self, object_id: str) -> MemoryObject | None:
+        with self.write_lock():
+            return self._get_object_unlocked(object_id)
+
+    def _get_object_unlocked(self, object_id: str) -> MemoryObject | None:
         if not self.db_path.exists():
             return None
         with self.connect() as con:
@@ -635,7 +709,11 @@ class WorkspaceStore:
             raise KeyError(f"memory object not found: {object_id}")
         return memory_object
 
-    def list_objects(
+    def list_objects(self, *, kind: str | None = None, promoted: bool | None = None) -> list[MemoryObject]:
+        with self.write_lock():
+            return self._list_objects_unlocked(kind=kind, promoted=promoted)
+
+    def _list_objects_unlocked(
         self, *, kind: str | None = None, promoted: bool | None = None
     ) -> list[MemoryObject]:
         self.initialize()
@@ -654,6 +732,10 @@ class WorkspaceStore:
         return [self.require_object(str(row["object_id"])) for row in rows]
 
     def search_fts(self, query: str, top_k: int = 10) -> list[SearchHit]:
+        with self.write_lock():
+            return self._search_fts_unlocked(query, top_k=top_k)
+
+    def _search_fts_unlocked(self, query: str, top_k: int = 10) -> list[SearchHit]:
         self.initialize()
         tokens = re.findall(r"[\w-]+", query, flags=re.UNICODE)
         if not tokens:
@@ -756,93 +838,156 @@ class WorkspaceStore:
         self._write_jsonl_atomic(self.ledgers_dir / "dark.jsonl", dark_entries)
         self._write_jsonl_atomic(self.ledgers_dir / "bright.jsonl", bright_entries)
 
+    def rebuild_catalog(self) -> dict[str, Any]:
+        self._check_workspace_version()
+        if not self.config_path.is_file():
+            return {"status": "failed", "errors": ["missing workspace.json; initialize a new workspace first"]}
+        with self.write_lock():
+            self._check_workspace_version()
+            return self._rebuild_catalog_unlocked()
+
+    def _rebuild_catalog_unlocked(self) -> dict[str, Any]:
+        snapshot = read_snapshot(self.root, allow_legacy=True)
+        if snapshot.errors:
+            return {"status": "failed", "errors": snapshot.errors, "warnings": snapshot.warnings}
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        descriptor, name = tempfile.mkstemp(prefix=".catalog-rebuild-", suffix=".sqlite3", dir=self.state_dir)
+        os.close(descriptor)
+        temporary = Path(name)
+        backup = None
+        try:
+            con = sqlite3.connect(temporary)
+            try:
+                con.execute("PRAGMA foreign_keys = ON")
+                self._create_schema(con)
+                with con:
+                    for record in snapshot.archives.values():
+                        columns = ", ".join(record)
+                        placeholders = ", ".join("?" for _ in record)
+                        con.execute(f"INSERT INTO archives ({columns}) VALUES ({placeholders})", tuple(record.values()))
+                    for obj, relative_path in snapshot.objects.values():
+                        record = object_row(obj, relative_path)
+                        columns = ", ".join(record)
+                        placeholders = ", ".join("?" for _ in record)
+                        con.execute(f"INSERT INTO objects ({columns}) VALUES ({placeholders})", tuple(record.values()))
+                        if obj.status == "active":
+                            con.execute("INSERT INTO objects_fts (object_id, title, summary, content, tags) VALUES (?, ?, ?, ?, ?)", fts_row(obj))
+                    con.executemany("INSERT INTO object_sources (object_id, archive_id, session_id, source_platform) VALUES (?, ?, ?, ?)", sorted(snapshot.sources))
+            finally:
+                con.close()
+            # All cooperating readers/writers hold workspace.lock. Keep the old
+            # database and its WAL together, including when the old DB is corrupt.
+            previous = [self.state_dir / ("catalog.sqlite3" + suffix) for suffix in ("", "-wal", "-shm", "-journal")]
+            moved: list[tuple[Path, Path]] = []
+            try:
+                if any(path.exists() for path in previous):
+                    backup = self.state_dir / "catalog-backups" / uuid.uuid4().hex
+                    backup.mkdir(parents=True)
+                    for path in previous:
+                        if path.exists():
+                            saved = backup / path.name
+                            path.replace(saved)
+                            moved.append((path, saved))
+                temporary.replace(self.db_path)
+            except BaseException:
+                for original, saved in reversed(moved):
+                    saved.replace(original)
+                raise
+            self._migrate_legacy_kinds_unlocked()
+            self._upgrade_workspace_config_unlocked()
+            self.sync_ledgers()
+            self.append_journal("catalog.rebuilt", {
+                "archives": len(snapshot.archives), "objects": len(snapshot.objects),
+                "backup": backup.relative_to(self.root).as_posix() if backup else None,
+            })
+            return {
+                "status": "completed", "archives": len(snapshot.archives),
+                "objects": len(snapshot.objects), "sources": len(snapshot.sources),
+                "warnings": snapshot.warnings,
+                "backup": backup.relative_to(self.root).as_posix() if backup else None,
+            }
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def validate(self) -> dict[str, Any]:
+        # Do not initialize or synchronize: validation must expose existing drift.
+        if not self.state_dir.is_dir():
+            return self._validate_unlocked()
         with self.write_lock():
             return self._validate_unlocked()
 
     def _validate_unlocked(self) -> dict[str, Any]:
-        self.initialize()
-        errors: list[str] = []
-        warnings: list[str] = []
-        required_dirs = [
-            self.evidence_dir / "primary",
-            self.evidence_dir / "auxiliary",
-            *(self.objects_dir / kind.value for kind in MemoryKind),
-            self.ledgers_dir,
-            self.state_dir,
-        ]
-        for path in required_dirs:
+        snapshot = read_snapshot(self.root)
+        errors = list(snapshot.errors)
+        warnings = list(snapshot.warnings)
+        try:
+            if not self.config_path.is_file():
+                errors.append("missing workspace.json")
+            else:
+                self._check_workspace_version()
+                config = json.loads(self.config_path.read_text(encoding="utf-8"))
+                if config.get("memory_kinds") != [kind.value for kind in MemoryKind]:
+                    errors.append("workspace memory kinds differ from supported schema")
+        except (OSError, ValueError) as exc:
+            errors.append(str(exc))
+        for path in [self.evidence_dir / "primary", self.evidence_dir / "auxiliary",
+                     *(self.objects_dir / kind.value for kind in MemoryKind), self.ledgers_dir, self.state_dir]:
             if not path.is_dir():
                 errors.append(f"missing directory: {path.relative_to(self.root)}")
-        for ledger_name in ("bright.jsonl", "dark.jsonl"):
-            ledger_path = self.ledgers_dir / ledger_name
-            if not ledger_path.is_file():
-                errors.append(f"missing ledger: ledgers/{ledger_name}")
-                continue
-            for lineno, line in enumerate(ledger_path.read_text(encoding="utf-8").splitlines(), 1):
-                if not line.strip():
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    errors.append(f"invalid {ledger_name} line {lineno}: {exc}")
-                    continue
-                canonical = self.root / str(entry.get("canonical_path", ""))
-                if not canonical.is_file():
-                    errors.append(
-                        f"{ledger_name} line {lineno} points to missing object: "
-                        f"{entry.get('canonical_path')}"
-                    )
-        with self.connect() as con:
-            object_rows = con.execute(
-                "SELECT object_id, kind, relative_path, status FROM objects"
-            ).fetchall()
-            archive_rows = con.execute(
-                "SELECT archive_id, relative_path FROM archives"
-            ).fetchall()
-            active_count = con.execute(
-                "SELECT COUNT(*) FROM objects WHERE status = 'active'"
-            ).fetchone()[0]
-            fts_count = con.execute("SELECT COUNT(*) FROM objects_fts").fetchone()[0]
-        for row in object_rows:
-            path = self.root / str(row["relative_path"])
-            if not path.is_file():
-                errors.append(f"database object missing file: {row['object_id']}")
-                continue
-            if str(row["kind"]) not in {kind.value for kind in MemoryKind}:
-                errors.append(
-                    f"database object uses non-canonical kind: {row['object_id']}"
-                )
+
+        dark, bright = ledger_entries(snapshot)
+        for name, expected in (("dark.jsonl", dark), ("bright.jsonl", bright)):
+            path = self.ledgers_dir / name
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                errors.append(f"invalid object file {row['object_id']}: {exc}")
-                continue
-            if not isinstance(payload, dict):
-                errors.append(f"invalid object file {row['object_id']}: expected object")
-                continue
-            if payload.get("kind") != row["kind"]:
-                errors.append(
-                    f"object kind/path catalog mismatch: {row['object_id']}"
-                )
-        for row in archive_rows:
-            archive_dir = self.root / str(row["relative_path"])
-            for name in ("session.json", "transcript.md", "manifest.json"):
-                if not (archive_dir / name).is_file():
-                    errors.append(f"archive {row['archive_id']} missing {name}")
-        if fts_count != active_count:
-            warnings.append(
-                f"FTS row count differs from active object count: {fts_count} != {active_count}"
-            )
+                actual = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+                if actual != expected:
+                    errors.append(f"{name} differs from canonical objects or provenance")
+            except (OSError, ValueError) as exc:
+                errors.append(f"invalid or missing {name}: {exc}")
+
+        db_objects, db_archives, db_fts = [], [], []
+        if not self.db_path.is_file():
+            errors.append("missing SQLite catalog; run aml reindex to rebuild from canonical files")
+        else:
+            try:
+                con = sqlite3.connect(self.db_path.as_uri() + "?mode=ro", uri=True)
+                con.row_factory = sqlite3.Row
+                try:
+                    if [row[0] for row in con.execute("PRAGMA quick_check")] != ["ok"]:
+                        errors.append("SQLite integrity check failed")
+                    db_objects = [dict(row) for row in con.execute("SELECT * FROM objects")]
+                    db_archives = [dict(row) for row in con.execute("SELECT * FROM archives")]
+                    db_sources = {tuple(row) for row in con.execute("SELECT object_id, archive_id, session_id, source_platform FROM object_sources")}
+                    db_fts = [tuple(row) for row in con.execute("SELECT object_id, title, summary, content, tags FROM objects_fts")]
+                finally:
+                    con.close()
+                expected_objects = {key: object_row(obj, path) for key, (obj, path) in snapshot.objects.items()}
+                actual_objects = {row["object_id"]: row for row in db_objects}
+                for object_id in sorted(set(expected_objects) | set(actual_objects)):
+                    expected, actual = expected_objects.get(object_id), actual_objects.get(object_id)
+                    if expected is None or actual is None:
+                        errors.append(f"object file/catalog membership mismatch: {object_id}")
+                        continue
+                    for key in ("tags_json", "aliases_json", "metadata_json"):
+                        expected[key] = json.loads(expected[key])
+                        actual[key] = json.loads(actual[key])
+                    if expected != actual:
+                        errors.append(f"object file/catalog content mismatch: {object_id}")
+                if {row["archive_id"]: row for row in db_archives} != snapshot.archives:
+                    errors.append("archive file/catalog mismatch")
+                if db_sources != snapshot.sources:
+                    errors.append("source provenance file/catalog mismatch")
+                expected_fts = [fts_row(obj) for obj, _ in snapshot.objects.values() if obj.status == "active"]
+                if sorted(db_fts) != sorted(expected_fts):
+                    errors.append("FTS contents differ from active canonical objects")
+            except (sqlite3.Error, OSError, ValueError, TypeError, KeyError) as exc:
+                errors.append(f"invalid SQLite catalog: {exc}")
         return {
-            "ok": not errors,
-            "root": str(self.root),
-            "archives": len(archive_rows),
-            "objects": len(object_rows),
-            "active_objects": active_count,
-            "fts_rows": fts_count,
-            "errors": errors,
-            "warnings": warnings,
+            "ok": not errors, "root": str(self.root),
+            "archives": len(db_archives), "objects": len(db_objects),
+            "active_objects": sum(obj.status == "active" for obj, _ in snapshot.objects.values()),
+            "canonical_archives": len(snapshot.archives), "canonical_objects": len(snapshot.objects),
+            "fts_rows": len(db_fts), "errors": errors, "warnings": warnings,
         }
 
     def append_journal(self, event_type: str, payload: dict[str, Any]) -> None:
@@ -856,33 +1001,12 @@ class WorkspaceStore:
         entry = {
             "event_type": event_type,
             "timestamp": utc_now(),
-            "payload": payload,
+            "payload": BasicSanitizer()._sanitize_mapping(payload),
         }
         with self.journal_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
 
-    @staticmethod
-    def _render_transcript(session: SessionBundle, library: str) -> str:
-        lines = [
-            f"# {session.title or session.session_id}",
-            "",
-            f"- Session ID: `{session.session_id}`",
-            f"- Source: `{session.source}`",
-            f"- Session type: `{session.session_type}`",
-            f"- Library: `{library}`",
-            f"- Messages: `{len(session.messages)}`",
-            "",
-            "## Transcript",
-            "",
-        ]
-        for index, message in enumerate(session.messages, 1):
-            heading = f"### {index}. {message.role}"
-            if message.name:
-                heading += f" ({message.name})"
-            if message.timestamp:
-                heading += f" — {message.timestamp}"
-            lines.extend([heading, "", message.content.strip() or "_(empty)_", ""])
-        return "\n".join(lines).rstrip() + "\n"
+    _render_transcript = staticmethod(render_transcript)
 
     @staticmethod
     def _write_json_atomic(path: Path, value: Any) -> None:

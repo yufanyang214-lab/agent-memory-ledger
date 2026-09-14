@@ -1,5 +1,5 @@
 {
   "name": "agent-memory-ledger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Standalone session archiving, structured objects, and bright/dark memory ledgers for Kimi Code CLI."
 }
