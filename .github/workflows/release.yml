@@ -1,0 +1,101 @@
+name: Alpha release
+
+on:
+  push:
+    branches:
+      - 'release/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alpha-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    if: startsWith(github.ref, 'refs/heads/release/')
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Require a commit already merged into main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Download packages built by this run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --name "agent-memory-ledger-$GITHUB_SHA" --dir release-assets
+      - name: Verify packages and prepare release notes
+        id: metadata
+        run: |
+          python - <<'PY'
+          import hashlib, os, re, subprocess, sys, tarfile, tempfile, tomllib, zipfile
+          from pathlib import Path
+          version = tomllib.loads(Path('pyproject.toml').read_text())['project']['version']
+          assert re.fullmatch(r'\d+\.\d+\.\d+', version), 'Unexpected version format'
+          assert os.environ['GITHUB_REF_NAME'] == f'release/v{version}', 'Branch/version mismatch'
+          tag = f'v{version}'
+          assert not subprocess.check_output(['git', 'tag', '--list', tag], text=True).strip(), 'Tag already exists; refusing to replace a release'
+          manifests = list(Path('release-assets').rglob('SHA256SUMS'))
+          assert len(manifests) == 1, 'Expected one checksum manifest'
+          directory = manifests[0].parent
+          wheel_name = f'agent_memory_ledger-{version}-py3-none-any.whl'
+          source_name = f'agent_memory_ledger-{version}.tar.gz'
+          assert {p.name for p in directory.iterdir()} == {wheel_name, source_name, 'SHA256SUMS'}
+          checksums = {}
+          for line in manifests[0].read_text().splitlines():
+              digest, name = line.split()
+              assert name in {wheel_name, source_name} and name not in checksums
+              checksums[name] = digest
+              assert hashlib.sha256((directory / name).read_bytes()).hexdigest() == digest, name
+          assert set(checksums) == {wheel_name, source_name}
+          with zipfile.ZipFile(directory / wheel_name) as wheel:
+              for path in Path('src/agent_memory_ledger').rglob('*.py'):
+                  assert wheel.read(path.relative_to('src').as_posix()) == path.read_bytes(), str(path)
+          with tempfile.TemporaryDirectory() as temporary:
+              with tarfile.open(directory / source_name) as source:
+                  source.extractall(temporary, filter='data')
+              extracted = Path(temporary) / f'agent_memory_ledger-{version}'
+              subprocess.run([sys.executable, 'scripts/clean_room_smoke.py'], cwd=extracted, check=True)
+          heading = f'## {version} —'
+          changelog = Path('CHANGELOG.md').read_text(encoding='utf-8')
+          section = changelog.split(heading, 1)[1].split('\n## ', 1)[0]
+          notes = Path(os.environ['RUNNER_TEMP']) / 'aml-release-notes.md'
+          notes.write_text(
+              f'Agent Memory Ledger {tag} is an Alpha prerelease.\n\n'
+              + section.split('\n', 1)[1].strip()
+              + '\n\nValidation: Linux (Python 3.11/3.12), Windows (Python 3.12), '
+              + 'and independent wheel/sdist installation and recovery.\n\n'
+              + 'Base retrieval uses SQLite FTS; Chinese substring matching and automatic '
+              + 'memory expiry remain outside this release. Historical runtime E2E reports '
+              + 'retain their dates; Kimi model-driven E2E remains unverified.\n', encoding='utf-8')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'version={version}\ndirectory={directory.as_posix()}\nnotes={notes.as_posix()}\n')
+          PY
+      - name: Publish Alpha with the verified packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          RELEASE_DIRECTORY: ${{ steps.metadata.outputs.directory }}
+          RELEASE_NOTES: ${{ steps.metadata.outputs.notes }}
+        run: |
+          gh release create "v$RELEASE_VERSION" \
+            "$RELEASE_DIRECTORY/agent_memory_ledger-$RELEASE_VERSION-py3-none-any.whl" \
+            "$RELEASE_DIRECTORY/agent_memory_ledger-$RELEASE_VERSION.tar.gz" \
+            "$RELEASE_DIRECTORY/SHA256SUMS" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "Agent Memory Ledger v$RELEASE_VERSION Alpha" \
+            --notes-file "$RELEASE_NOTES"

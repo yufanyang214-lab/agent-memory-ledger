@@ -1,5 +1,9 @@
 # Agent Memory Ledger
 
+**Status: Alpha.** Python 3.11+; MIT license. See the
+[v0.1.1 release](https://github.com/yufanyang214-lab/agent-memory-ledger/releases/tag/v0.1.1)
+and [recovery guide](docs/RECOVERY.md) for the current behavior and limitations.
+
 Prevent long-lived startup memory files such as `MEMORY.md` from growing until
 they make startup injection heavy, crowd out the task context, or are
 truncated.

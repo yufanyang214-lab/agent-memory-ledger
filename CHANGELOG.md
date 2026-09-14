@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 — release candidate, 2026-09-14
+## 0.1.1 — Alpha, 2026-09-14
 
 - Rebuild SQLite, FTS, and ledger snapshots from verified canonical files.
 - Preserve complete object provenance on disk, with journal-based compatibility
