@@ -120,7 +120,7 @@ Install the core into a repository:
 KIMI_HOME="${KIMI_SHARE_DIR:-$HOME/.kimi}"
 python "$KIMI_HOME/plugins/agent-memory-ledger/scripts/install.py" \
   --workspace "$PWD" \
-  --source /path/to/agent_memory_ledger-0.1.0-py3-none-any.whl
+  --source /path/to/agent_memory_ledger-0.1.1-py3-none-any.whl
 ```
 
 The plugin root contains `SKILL.md`, so Kimi discovers it as a Skill. Archive

@@ -31,7 +31,7 @@ Then install the core package once into the current repository:
 KIMI_HOME="${KIMI_SHARE_DIR:-$HOME/.kimi}"
 python "$KIMI_HOME/plugins/agent-memory-ledger/scripts/install.py" \
   --workspace "$PWD" \
-  --source /path/to/agent_memory_ledger-0.1.0-py3-none-any.whl
+  --source /path/to/agent_memory_ledger-0.1.1-py3-none-any.whl
 ```
 
 Use these paths:

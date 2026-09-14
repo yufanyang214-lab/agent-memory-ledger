@@ -29,7 +29,7 @@ Install the core package and stable repository-local bridge once:
 ```bash
 python "$SKILL_DIR/scripts/install.py" \
   --workspace "$PWD" \
-  --source /path/to/agent_memory_ledger-0.1.0-py3-none-any.whl
+  --source /path/to/agent_memory_ledger-0.1.1-py3-none-any.whl
 ```
 
 Use these paths from the repository root:

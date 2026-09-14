@@ -107,6 +107,24 @@ def main() -> int:
             agent, child_env, True,
         )
 
+        # Exercise the installed wheel's recovery path, including persisted
+        # promotion/retraction. No source checkout or extractor is used here.
+        retired_id = bright[0]["object_id"]
+        call(base + ["retract", retired_id, "--reason", "synthetic recovery check"], agent, child_env, True)
+        restored = agent / "restored-memory"
+        shutil.copytree(memory, restored, ignore=shutil.ignore_patterns(
+            "catalog.sqlite3*", "bright.jsonl", "dark.jsonl",
+        ))
+        restored_base = [str(aml), "--workspace", str(restored)]
+        missing = subprocess.run(restored_base + ["validate"], cwd=agent, env=child_env, text=True, capture_output=True)
+        rebuilt = call(restored_base + ["reindex"], agent, child_env, True)
+        restored_check = call(restored_base + ["validate"], agent, child_env, True)
+        retired = call(restored_base + ["show", retired_id], agent, child_env, True)
+        restored_bright = call(restored_base + ["list", "--bright"], agent, child_env, True)
+        restored_hits = call(restored_base + ["search", "filesystem verification memory"], agent, child_env, True)
+        # Continue the original assertions against the untouched pre-retraction
+        # results, then check the explicit recovery outcomes separately.
+
         count = lambda path: sum(bool(line.strip()) for line in path.read_text().splitlines())
         bright_path = memory / "ledgers/bright.jsonl"
         dark_path = memory / "ledgers/dark.jsonl"
@@ -130,13 +148,18 @@ def main() -> int:
                 and not (memory / "objects/semantic").exists()
                 and not (memory / "objects/procedural").exists()
             ),
-            "bright_ledger": bright_path.is_file() and count(bright_path) >= 2,
+            "bright_ledger": bright_path.is_file() and count(bright_path) >= 1,
             "dark_ledger": dark_path.is_file() and count(dark_path) >= 3,
             "sqlite": (memory / "state/catalog.sqlite3").is_file(),
             "restart_recall": bool(searched),
             "fts": any("fts" in item.get("retrieval_sources", []) for item in searched),
             "plugin": any("overlap-example" in item.get("retrieval_sources", []) for item in searched),
             "promoted": len(bright) >= 2,
+            "missing_index_detected": missing.returncode == 2 and json.loads(missing.stdout).get("ok") is False,
+            "catalog_rebuilt": rebuilt.get("status") == "completed" and restored_check.get("ok") is True,
+            "restored_recall": bool(restored_hits),
+            "retraction_preserved": retired.get("status") == "retracted" and not retired.get("promoted"),
+            "promotion_preserved": len(restored_bright) == len(bright) - 1,
             "raw_text_only_in_evidence": (
                 "Remember release checks" not in archive_event.get("content", "")
                 and "Last context" not in archive_event.get("content", "")

@@ -80,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate = subparsers.add_parser("validate", help="validate workspace consistency")
     _add_plugin_args(validate)
 
-    reindex = subparsers.add_parser("reindex", help="rebuild an optional semantic index")
+    reindex = subparsers.add_parser("reindex", help="rebuild SQLite, ledgers, and an optional semantic index")
     _add_plugin_args(reindex)
 
     return parser
@@ -100,6 +100,7 @@ def _make_ledger(args: argparse.Namespace) -> MemoryLedger:
         workspace,
         extractor=extractor,
         semantic_index=semantic_index,
+        initialize=args.command not in {"validate", "reindex"},
     )
 
 
@@ -137,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             _print(result)
             return 0 if result.get("ok") else 2
         if args.command == "reindex":
-            result = ledger.rebuild_semantic_index()
+            result = ledger.reindex()
             _print(result)
             return 0 if result.get("status") in {"completed", "disabled"} else 2
     except (OSError, ValueError, KeyError, TypeError) as exc:

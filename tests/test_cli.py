@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from hashlib import sha256
 from pathlib import Path
 
 
@@ -73,6 +74,53 @@ class CliTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["status"], "error")
         self.assertIn("ValueError", payload["error"])
+
+    def test_validate_and_reindex_work_when_catalog_is_missing(self) -> None:
+        self._run("ingest", str(self.session_path))
+        index = self.workspace / "state" / "catalog.sqlite3"
+        index.unlink()
+        checked = self._run_raw("validate")
+        self.assertEqual(checked.returncode, 2)
+        self.assertFalse(json.loads(checked.stdout)["ok"])
+        self.assertFalse(index.exists())
+        rebuilt = self._run("reindex")
+        self.assertEqual(rebuilt["status"], "completed")
+        self.assertEqual(rebuilt["semantic_index"]["status"], "disabled")
+        self.assertTrue(self._run("validate")["ok"])
+        self.assertTrue(self._run("search", "durable memory"))
+
+    def test_reindex_migrates_legacy_workspace_with_empty_kinds(self) -> None:
+        session = json.loads(self.session_path.read_text(encoding="utf-8"))
+        session["messages"][0]["content"] = "Archive this synthetic session."
+        session["memory_candidates"][0]["kind"] = "knowledge"
+        self.session_path.write_text(json.dumps(session), encoding="utf-8")
+        self._run("ingest", str(self.session_path))
+        path = next(self.workspace.glob("objects/knowledge/*.json"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        current_id = payload["object_id"]
+        identity = f"semantic\0{payload['title'].strip()}\0{' '.join(payload['content'].split())}"
+        legacy_id = "mem_" + sha256(identity.encode("utf-8")).hexdigest()[:20]
+        payload.update(object_id=legacy_id, kind="semantic", schema_version=1)
+        payload["metadata"].pop("_aml_source_archive_ids")
+        legacy_dir = self.workspace / "objects" / "semantic"
+        legacy_dir.mkdir()
+        (legacy_dir / f"{legacy_id}.json").write_text(json.dumps(payload), encoding="utf-8")
+        path.unlink()
+        (self.workspace / "objects" / "knowledge").rmdir()
+        (self.workspace / "objects" / "procedure").rmdir()
+        (self.workspace / "objects" / "procedural").mkdir()
+        journal = self.workspace / "state" / "journal.jsonl"
+        journal.write_text(journal.read_text(encoding="utf-8").replace(current_id, legacy_id), encoding="utf-8")
+        config_path = self.workspace / "workspace.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config.update(schema_version=1, memory_kinds=["semantic", "procedural", "event"])
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+
+        rebuilt = self._run("reindex")
+        self.assertEqual(rebuilt["status"], "completed", rebuilt)
+        self.assertTrue(self._run("validate")["ok"])
+        self.assertEqual(self._run("list", "--kind", "knowledge")[0]["object_id"], legacy_id)
+        self.assertEqual(self._run("list", "--kind", "procedure"), [])
 
     def _run(self, *args: str) -> object:
         completed = self._run_raw(*args)

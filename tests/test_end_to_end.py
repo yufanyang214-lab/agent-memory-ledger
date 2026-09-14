@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from agent_memory_ledger import MemoryLedger, SessionBundle
@@ -172,7 +173,7 @@ class MemoryLedgerEndToEndTests(unittest.TestCase):
         )
         self.assertTrue(merged.promoted)
 
-        with sqlite3.connect(self.ledger.store.db_path) as con:
+        with closing(sqlite3.connect(self.ledger.store.db_path)) as con, con:
             count = con.execute(
                 "SELECT COUNT(*) FROM object_sources WHERE object_id = ?", (object_id,)
             ).fetchone()[0]

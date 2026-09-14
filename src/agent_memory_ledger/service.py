@@ -19,12 +19,14 @@ class MemoryLedger:
         sanitizer: Sanitizer | None = None,
         extractor: MemoryExtractor | None = None,
         semantic_index: SemanticIndex | None = None,
+        initialize: bool = True,
     ):
         self.store = WorkspaceStore(workspace)
         self.sanitizer = sanitizer or BasicSanitizer()
         self.extractor = extractor or HeuristicExtractor()
         self.semantic_index = semantic_index
-        self.store.initialize()
+        if initialize:
+            self.store.initialize()
 
     @property
     def workspace(self) -> Path:
@@ -166,6 +168,17 @@ class MemoryLedger:
             memory_object.to_dict()
             for memory_object in self.store.list_objects(kind=kind, promoted=promoted)
         ]
+
+    def reindex(self) -> dict[str, Any]:
+        catalog = self.store.rebuild_catalog()
+        if catalog["status"] != "completed":
+            return {"status": "failed", "catalog": catalog}
+        semantic = self.rebuild_semantic_index()
+        return {
+            "status": "failed" if semantic["status"] == "failed" else "completed",
+            "catalog": catalog,
+            "semantic_index": semantic,
+        }
 
     def rebuild_semantic_index(self) -> dict[str, Any]:
         if self.semantic_index is None:

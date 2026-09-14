@@ -85,6 +85,8 @@ The filesystem is the source of truth. SQLite and vector indexes are derived and
 ## Quick start
 
 ```bash
+git clone https://github.com/yufanyang214-lab/agent-memory-ledger.git
+cd agent-memory-ledger
 python -m venv .venv
 . .venv/bin/activate
 pip install -e .
@@ -197,7 +199,7 @@ openclaw skills install ./integrations/openclaw-skill \
   --as agent-memory-ledger
 
 python skills/agent-memory-ledger/scripts/install.py \
-  --source /path/to/agent_memory_ledger-0.1.0-py3-none-any.whl
+  --source /path/to/agent_memory_ledger-0.1.1-py3-none-any.whl
 ```
 
 The Skill exports a trajectory, retains only visible user/assistant text, and
@@ -330,12 +332,46 @@ aml list [--kind knowledge|procedure|event] [--bright]
 aml show OBJECT_ID
 aml promote OBJECT_ID [--reason TEXT]
 aml retract OBJECT_ID --reason TEXT
-aml reindex --semantic-plugin module:factory
+aml reindex [--semantic-plugin module:factory]
 aml validate
 ```
 
 All commands accept `--workspace PATH`. `AML_WORKSPACE` may also set the default
 workspace.
+
+### Validation and recovery
+
+```bash
+aml --workspace ./memory validate
+aml --workspace ./memory reindex
+aml --workspace ./memory validate
+```
+
+`validate` inspects the existing state without initializing or rewriting memory
+files. It checks evidence hashes and transcripts, object IDs and contents,
+source references, ledger snapshots, and every FTS record against canonical
+files. A missing or inconsistent catalog returns a nonzero exit code.
+
+`reindex` rebuilds the SQLite catalog, FTS, and both ledgers from verified files.
+An optional semantic plugin is rebuilt afterward. The operation preserves
+object IDs, timestamps, promotions, retractions, and all recorded sources; it
+does not rerun extraction. Invalid canonical evidence blocks recovery before
+the old index or ledgers are replaced. Replaced database files are retained
+together under `state/catalog-backups/`.
+
+Opening a workspace whose catalog is missing also attempts this verified
+recovery. For a corrupt existing database, use the explicit `reindex` command.
+Workspaces from a newer schema are rejected before migration or rewriting.
+
+Back up `workspace.json`, `evidence/`, `objects/`, and `state/journal.jsonl`.
+New objects persist all source archive IDs in the reserved metadata field
+`_aml_source_archive_ids`. Older objects may require the journal to recover
+secondary provenance; keep it with backups. SQLite and the ledger snapshots
+are replaceable derivatives. See [recovery details](docs/RECOVERY.md).
+
+These fixes are in source version **0.1.1**. The historical **0.1.0** release
+assets predate them. Build from the desired checkout or install a wheel from
+its matching release; see [release instructions](RELEASING.md).
 
 ## Plugins
 

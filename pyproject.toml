@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-memory-ledger"
-version = "0.1.0"
+version = "0.1.1"
 description = "File-first session archiving, structured memory objects, and bright/dark ledgers for any AI agent."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,6 +18,11 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/yufanyang214-lab/agent-memory-ledger"
+Issues = "https://github.com/yufanyang214-lab/agent-memory-ledger/issues"
+Changelog = "https://github.com/yufanyang214-lab/agent-memory-ledger/blob/main/CHANGELOG.md"
 
 [project.scripts]
 agent-memory-ledger = "agent_memory_ledger.cli:main"
