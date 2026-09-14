@@ -162,6 +162,50 @@ class RecoveryTests(unittest.TestCase):
         with restored.store.connect() as con:
             self.assertEqual(con.execute("SELECT COUNT(*) FROM object_sources WHERE object_id = ?", (self.fact_id,)).fetchone()[0], 2)
 
+    def test_file_backed_recovery_preserves_a_damaged_journal(self) -> None:
+        for automatic in (False, True):
+            with self.subTest(automatic=automatic):
+                restored = self.root / f"damaged-journal-{automatic}"
+                shutil.copytree(self.workspace, restored)
+                journal = restored / "state" / "journal.jsonl"
+                damaged = journal.read_bytes() + b'{"event_type":'
+                journal.write_bytes(damaged)
+                (restored / "state" / "catalog.sqlite3").unlink()
+                ledger = MemoryLedger(restored, initialize=automatic)
+                if not automatic:
+                    result = ledger.reindex()
+                    self.assertEqual(result["status"], "completed", result)
+                    self.assertTrue(any("invalid audit journal" in item for item in result["catalog"]["warnings"]))
+                self.assertEqual(ledger.search("orchid")[0]["object_id"], self.fact_id)
+                self.assertEqual(ledger.search("retired amber"), [])
+                with ledger.store.connect() as con:
+                    self.assertEqual(con.execute("SELECT COUNT(*) FROM object_sources WHERE object_id = ?", (self.fact_id,)).fetchone()[0], 2)
+                # Recovery must not erase the audit damage or append onto the
+                # partial record. Validation still reports the damaged journal.
+                self.assertEqual(journal.read_bytes(), damaged)
+                report = ledger.validate()
+                self.assertFalse(report["ok"])
+                self.assertTrue(report["errors"], report)
+                self.assertTrue(all("invalid audit journal" in item for item in report["errors"]), report)
+
+    def test_damaged_journal_blocks_legacy_provenance_recovery(self) -> None:
+        path = self.workspace / "objects" / "knowledge" / f"{self.fact_id}.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["metadata"].pop("_aml_source_archive_ids")
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        journal = self.workspace / "state" / "journal.jsonl"
+        journal.write_bytes(journal.read_bytes() + b'{"event_type":')
+        before = self.files()
+        result = self.ledger.reindex()
+        self.assertEqual(result["status"], "failed", result)
+        self.assertTrue(any("invalid audit journal" in item for item in result["catalog"]["errors"]))
+        self.assertEqual(self.files(), before)
+        self.ledger.store.db_path.unlink()
+        before = self.files()
+        with self.assertRaisesRegex(RuntimeError, "invalid audit journal"):
+            MemoryLedger(self.workspace)
+        self.assertEqual(self.files(), before)
+
 
 class WindowsLockTests(unittest.TestCase):
     def test_waits_through_repeated_contention(self) -> None:

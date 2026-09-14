@@ -48,9 +48,13 @@ class Snapshot:
     sources: set[tuple[str, str, str, str]] = field(default_factory=set)
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    journal_errors: list[str] = field(default_factory=list)
 
 
-def read_snapshot(root: Path, *, allow_legacy: bool = False) -> Snapshot:
+def read_snapshot(
+    root: Path, *, allow_legacy: bool = False, allow_damaged_journal: bool = False,
+) -> Snapshot:
+    """Journal damage is recoverable only when all provenance is file-backed."""
     result = Snapshot()
     for directory in (root / "objects", root / "evidence"):
         if not directory.is_dir():
@@ -172,7 +176,16 @@ def read_snapshot(root: Path, *, allow_legacy: bool = False) -> Snapshot:
                     if isinstance(object_id, str) and isinstance(source_id, str):
                         legacy_sources.setdefault(object_id, set()).add(source_id)
         except (OSError, ValueError) as exc:
-            result.errors.append(f"invalid audit journal: {exc}")
+            result.journal_errors.append(f"invalid audit journal: {exc}")
+
+    needs_journal = any(SOURCE_IDS_KEY not in obj.metadata for obj, _ in result.objects.values())
+    if allow_damaged_journal and not needs_journal:
+        result.warnings.extend(
+            f"{error}; rebuilding from object provenance and leaving the journal unchanged"
+            for error in result.journal_errors
+        )
+    else:
+        result.errors.extend(result.journal_errors)
 
     for object_id in sorted(set(legacy_sources) - known_object_ids):
         result.errors.append(f"journal references a missing or invalid canonical object: {object_id}")

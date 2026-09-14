@@ -130,13 +130,16 @@ class WorkspaceStore:
         )
 
 
-    def _initialize_unlocked(self) -> None:
+    def _ensure_directories_unlocked(self) -> None:
         for library in ("primary", "auxiliary"):
             (self.evidence_dir / library).mkdir(parents=True, exist_ok=True)
         for kind in MemoryKind:
             (self.objects_dir / kind.value).mkdir(parents=True, exist_ok=True)
         self.ledgers_dir.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
+
+    def _initialize_unlocked(self) -> None:
+        self._ensure_directories_unlocked()
         if not self.config_path.exists():
             self._write_json_atomic(
                 self.config_path,
@@ -239,7 +242,7 @@ class WorkspaceStore:
         finally:
             con.close()
 
-    def _migrate_legacy_kinds_unlocked(self) -> bool:
+    def _migrate_legacy_kinds_unlocked(self, *, record_journal: bool = True) -> bool:
         """Move pre-0.1 object files to canonical kind directories without changing IDs."""
         migrated: list[dict[str, str]] = []
         for legacy_kind, canonical_kind in MEMORY_KIND_ALIASES.items():
@@ -323,7 +326,7 @@ class WorkspaceStore:
                         "to": canonical_kind,
                     }
                 )
-        if migrated:
+        if migrated and record_journal:
             self._append_journal_unlocked(
                 "workspace.memory_kinds_migrated",
                 {"objects": migrated, "schema_version": WORKSPACE_SCHEMA_VERSION},
@@ -847,10 +850,11 @@ class WorkspaceStore:
             return self._rebuild_catalog_unlocked()
 
     def _rebuild_catalog_unlocked(self) -> dict[str, Any]:
-        snapshot = read_snapshot(self.root, allow_legacy=True)
+        snapshot = read_snapshot(self.root, allow_legacy=True, allow_damaged_journal=True)
         if snapshot.errors:
             return {"status": "failed", "errors": snapshot.errors, "warnings": snapshot.warnings}
-        self.state_dir.mkdir(parents=True, exist_ok=True)
+        # Explicit reindex bypasses initialize, including for empty legacy kinds.
+        self._ensure_directories_unlocked()
         descriptor, name = tempfile.mkstemp(prefix=".catalog-rebuild-", suffix=".sqlite3", dir=self.state_dir)
         os.close(descriptor)
         temporary = Path(name)
@@ -893,13 +897,16 @@ class WorkspaceStore:
                 for original, saved in reversed(moved):
                     saved.replace(original)
                 raise
-            self._migrate_legacy_kinds_unlocked()
+            self._migrate_legacy_kinds_unlocked(record_journal=not snapshot.journal_errors)
             self._upgrade_workspace_config_unlocked()
             self.sync_ledgers()
-            self.append_journal("catalog.rebuilt", {
-                "archives": len(snapshot.archives), "objects": len(snapshot.objects),
-                "backup": backup.relative_to(self.root).as_posix() if backup else None,
-            })
+            # Keep damaged audit evidence byte-for-byte; appending would merge
+            # a new event into a partial JSON record. Validation still flags it.
+            if not snapshot.journal_errors:
+                self.append_journal("catalog.rebuilt", {
+                    "archives": len(snapshot.archives), "objects": len(snapshot.objects),
+                    "backup": backup.relative_to(self.root).as_posix() if backup else None,
+                })
             return {
                 "status": "completed", "archives": len(snapshot.archives),
                 "objects": len(snapshot.objects), "sources": len(snapshot.sources),

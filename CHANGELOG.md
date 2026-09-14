@@ -8,6 +8,9 @@
 - Validate evidence hashes, transcripts, object contents, provenance, ledgers,
   and exact FTS contents without silently repairing them.
 - Retain replaced databases and sidecars in a private recovery backup.
+- Recover file-backed provenance despite a damaged journal, preserving the
+  original audit bytes and validation errors; fail if legacy provenance needs it.
+- Create empty canonical kind directories during explicit legacy reindex.
 - Reject newer workspace schemas before modifying their metadata.
 - Keep waiting for contended Windows locks, while surfacing permanent errors.
 - Redact identifier fields, nested metadata keys, retraction reasons, and audit

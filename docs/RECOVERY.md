@@ -52,6 +52,13 @@ reserved key. Older objects retain their primary source in the object and may
 need the append-only journal for secondary sources. Missing legacy journal
 coverage is reported as a warning; it cannot be reconstructed with certainty.
 
+A damaged journal (for example, a partial JSON record after a crash) does not
+block catalog recovery when every object already contains its complete source
+archive list. Reindex reports a warning and preserves that journal byte-for-byte,
+without appending a recovery event. `validate` continues to report the audit
+damage until the journal is restored from a trusted backup. If any legacy
+object still needs the journal for provenance, journal damage blocks recovery.
+
 Back up a quiescent workspace, or coordinate a snapshot using AML's workspace
 lock. A plain recursive copy taken concurrently with mutations may span more
 than one consistent state. Rebuild backups contain old private data and are
@@ -60,6 +67,7 @@ never suitable for a public bug report.
 The workspace schema remains 2. Newer unsupported schemas are rejected before
 any migration; pre-0.1 semantic/procedural aliases remain supported, including
 their original object IDs.
+Explicit reindex also creates empty canonical kind directories during migration.
 
 ## Boundaries
 
