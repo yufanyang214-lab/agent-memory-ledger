@@ -129,5 +129,22 @@ class KimiBridgeTests(unittest.TestCase):
             )
 
 
+    def test_synthetic_user_message_boundaries_and_input_types(self) -> None:
+        """Only leading whitespace may precede a case-insensitive reminder tag."""
+        for text in (
+            "<system-reminder>generated</system-reminder>",
+            "\u2003<SYSTEM-REMINDER>generated</SYSTEM-REMINDER>",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(BRIDGE.is_synthetic_user_message(text))
+
+        for text in ("", "🧪 <system-reminder>user-provided text", "<system-reminder"):
+            with self.subTest(text=text):
+                self.assertFalse(BRIDGE.is_synthetic_user_message(text))
+
+        with self.assertRaises(AttributeError):
+            BRIDGE.is_synthetic_user_message(None)  # type: ignore[arg-type]
+
+
 if __name__ == "__main__":
     unittest.main()
